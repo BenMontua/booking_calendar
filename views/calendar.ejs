@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>Buchen</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #calendar { max-width: 900px; margin: 0 auto 20px auto; }
+    form { max-width: 900px; margin: 0 auto; }
+    label { display: block; margin: 10px 0 5px; }
+    input, select, button { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <h1>Buchung anfragen</h1>
+  
+  <div id="calendar"></div>
+  
+  <form id="bookingForm" style="display:none;">
+    <input type="hidden" name="start_date" />
+    <input type="hidden" name="end_date" />
+    
+    <label>Titel der Buchung</label>
+    <input type="text" name="title" required />
+    
+    <label>Name</label>
+    <input type="text" name="name" required />
+    
+    <label>Email</label>
+    <input type="email" name="email" required />
+    
+    <label>Kategorie</label>
+    <select name="category" required>
+      <option value="Kategorie A">Kategorie A</option>
+      <option value="Kategorie B">Kategorie B</option>
+      <option value="Kategorie C">Kategorie C</option>
+    </select>
+    
+    <button type="submit">Buchung senden</button>
+  </form>
+
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const calendarEl = document.getElementById('calendar');
+      const bookingForm = document.getElementById('bookingForm');
+
+      const calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        selectable: true,
+        selectMirror: true,
+        events: fetchBookings,
+        select(info) {
+          bookingForm.style.display = 'block';
+          bookingForm.start_date.value = info.startStr;
+          bookingForm.end_date.value = info.endStr;
+          window.scrollTo(0, bookingForm.offsetTop);
+        }
+      });
+
+      calendar.render();
+
+      function fetchBookings(fetchInfo, successCallback, failureCallback) {
+        fetch('/api/events')
+          .then(res => res.json())
+          .then(data => {
+            // Buchungen als normale Events darstellen
+            const events = data.map(b => ({
+              id: b.id,
+              title: b.title + ' (' + b.category + ')',
+              start: b.start,
+              end: b.end,
+              backgroundColor: '#faa'
+            }));
+            successCallback(events);
+          })
+          .catch(() => failureCallback());
+      }
+
+      bookingForm.addEventListener('submit', e => {
+        e.preventDefault();
+        const formData = new FormData(bookingForm);
+        const data = {
+          title: formData.get('title'),
+          start_date: formData.get('start_date'),
+          end_date: formData.get('end_date'),
+          name: formData.get('name'),
+          email: formData.get('email'),
+          category: formData.get('category')
+        };
+        fetch('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        }).then(res => res.json())
+          .then(resData => {
+            if (resData.success) {
+              alert(`Buchung erfolgreich. Gesamtpreis: ${resData.total_price.toFixed(2)} €`);
+              bookingForm.reset();
+              bookingForm.style.display = 'none';
+              calendar.refetchEvents();
+            } else {
+              alert('Fehler bei der Buchung');
+            }
+          }).catch(() => alert('Fehler bei der Buchung'));
+      });
+    });
+  </script>
+</body>
+</html>

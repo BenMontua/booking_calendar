@@ -1,0 +1,211 @@
+const express = require('express');
+const sqlite3 = require('better-sqlite3');
+const path = require('path');
+const session = require('express-session');
+const nodemailer = require('nodemailer');
+const ics = require('ics');
+const app = express();
+const db = sqlite3('database.db');
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+
+app.use(express.static('public'));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(session({ secret: 'adminsecret', resave: false, saveUninitialized: false }));
+
+const FIXKOSTEN = { reinigung: 40, bettwaesche: 10 };
+
+// Tabellen erstellen
+const createTables = `
+CREATE TABLE IF NOT EXISTS bookings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT,
+  start_date TEXT,
+  end_date TEXT,
+  name TEXT,
+  email TEXT,
+  category TEXT,
+  total_price REAL
+);
+CREATE TABLE IF NOT EXISTS prices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT,
+  category TEXT,
+  price REAL
+);`;
+db.exec(createTables);
+
+// SMTP Transporter für Nodemailer (bitte SMTP Daten anpassen)
+const transporter = nodemailer.createTransport({
+  host: 'smtp.example.com', // z.B. smtp.gmail.com
+  port: 587,
+  secure: false,
+  auth: {
+    user: 'dein@email.de',
+    pass: 'deinpasswort'
+  }
+});
+
+// Buchungen abrufen (JSON)
+app.get('/api/events', (req, res) => {
+  const rows = db.prepare('SELECT * FROM bookings').all();
+  const events = rows.map(b => ({
+    id: b.id,
+    title: b.title,
+    start: b.start_date,
+    end: b.end_date,
+    backgroundColor: '#faa',
+    extendedProps: { name: b.name, email: b.email, total_price: b.total_price }
+  }));
+  res.json(events);
+});
+
+// Preise abrufen – gestapelt, farbig pro Kategorie
+app.get('/api/prices', (req, res) => {
+  const colorMap = {
+    Standard: '#add8e6', // hellblau
+    Premium: '#90ee90',  // hellgrün
+    Deluxe: '#fdd9b5'    // orange-beige
+  };
+
+  const rows = db.prepare('SELECT * FROM prices').all();
+  const events = rows.map(p => ({
+    title: `${p.category}: ${p.price.toFixed(2)} €`,
+    start: p.date,
+    end: p.date,
+    backgroundColor: colorMap[p.category] || '#eef'
+  }));
+  res.json(events);
+});
+
+
+app.post('/api/prices', (req, res) => {
+  try {
+    const { start_date, end_date, category, price } = req.body;
+
+    if (!start_date || !end_date || !category || typeof price !== 'number') {
+      return res.status(400).json({ error: 'Ungültige Eingabedaten' });
+    }
+
+    const stmt = db.prepare('INSERT INTO prices (date, category, price) VALUES (?, ?, ?)');
+    const start = new Date(start_date);
+    const end = new Date(end_date);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ error: 'Ungültige Datumsangabe' });
+    }
+
+    const dates = [];
+    let current = new Date(start);
+    while (current <= end) {
+      const dateStr = current.toISOString().slice(0, 10);
+      dates.push(dateStr);
+      current.setDate(current.getDate() + 1);
+    }
+
+    const insertMany = db.transaction((rows) => {
+      for (const date of rows) {
+        stmt.run(date, category, price);
+      }
+    });
+
+    insertMany(dates);
+
+    res.json({ success: true, inserted: dates.length });
+  } catch (err) {
+    console.error('Fehler beim Einfügen von Preisen:', err);
+    res.status(500).json({ error: 'Serverfehler beim Speichern' });
+  }
+});
+
+// Buchung speichern & E-Mail senden
+app.post('/api/events', async (req, res) => {
+  try {
+    const { title, start_date, end_date, name, email, category } = req.body;
+    const start = new Date(start_date);
+    const end = new Date(end_date);
+    let current = new Date(start);
+
+    const dayPricesStmt = db.prepare('SELECT price FROM prices WHERE date = ? AND category = ?');
+    let sum = 0;
+    while (current < end) {
+      const dateStr = current.toISOString().slice(0, 10);
+      const priceEntry = dayPricesStmt.get(dateStr, category);
+      if (priceEntry) sum += priceEntry.price;
+      current.setDate(current.getDate() + 1);
+    }
+    sum += FIXKOSTEN.reinigung + FIXKOSTEN.bettwaesche;
+
+    const insert = db.prepare('INSERT INTO bookings (title, start_date, end_date, name, email, category, total_price) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    const info = insert.run(title, start_date, end_date, name, email, category, sum);
+
+    // E-Mail senden
+    const mailOptions = {
+      from: '"Buchungsportal" <no-reply@deine-domain.de>',
+      to: email,
+      subject: 'Ihre Buchungsbestätigung',
+      text: `Hallo ${name},
+
+Ihre Buchung wurde erfolgreich erfasst:
+
+Titel: ${title}
+Zeitraum: ${start_date} bis ${end_date}
+Kategorie: ${category}
+Gesamtpreis: ${sum.toFixed(2)} €
+
+Vielen Dank!
+
+Mit freundlichen Grüßen,
+Ihr Buchungsteam`
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.json({ success: true, total_price: sum });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Interner Serverfehler' });
+  }
+});
+
+// iCal Export Route (alle Buchungen)
+app.get('/api/ical', (req, res) => {
+  const bookings = db.prepare('SELECT * FROM bookings').all();
+
+  const events = bookings.map(b => {
+    // Datum konvertieren [YYYY, M-1, D, H, M]
+    const startDate = new Date(b.start_date);
+    const endDate = new Date(b.end_date);
+
+    return {
+      start: [startDate.getFullYear(), startDate.getMonth()+1, startDate.getDate(), 0, 0],
+      end: [endDate.getFullYear(), endDate.getMonth()+1, endDate.getDate(), 0, 0],
+      title: `${b.title} (${b.category})`,
+      description: `Gebucht von: ${b.name} (${b.email})\nPreis: ${b.total_price.toFixed(2)} €`
+    };
+  });
+
+  ics.createEvents(events, (error, value) => {
+    if (error) {
+      console.error(error);
+      return res.status(500).send('Fehler beim Erzeugen des iCal-Exports');
+    }
+    res.setHeader('Content-Disposition', 'attachment; filename="buchungen.ics"');
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.send(value);
+  });
+});
+
+// Adminseite anzeigen
+app.get('/admin', (req, res) => {
+  res.render('admin');
+});
+
+// Buchungsseite anzeigen
+app.get('/', (req, res) => {
+  res.render('calendar');
+});
+
+app.listen(3000, () => console.log('Server auf http://localhost:3000'));

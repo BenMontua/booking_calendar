@@ -1,0 +1,19 @@
+{
+  "name": "booking-calendar-app",
+  "version": "1.0.0",
+  "description": "Buchungskalender mit Node.js, SQLite, E-Mail-Bestätigung und iCal-Export",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "Dein Name",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "express-session": "^1.18.1",
+    "ics": "^3.8.1",
+    "nodemailer": "^7.0.5"
+  }
+}
