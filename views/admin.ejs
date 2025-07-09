@@ -46,6 +46,25 @@
     .fc-event-title {
       font-size: 0.85em;
     }
+
+    /* Buchungs-Bearbeitungsdialog */
+    #bookingModal {
+      display: none;
+      position: fixed;
+      top: 20%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: white;
+      border: 1px solid #ccc;
+      padding: 1rem;
+      z-index: 1001;
+    }
+
+    #bookingModal input, #bookingModal select {
+      display: block;
+      margin: 0.5rem 0;
+      width: 100%;
+    }
   </style>
 </head>
 <body>
@@ -74,17 +93,111 @@
     </form>
   </div>
 
+  <!-- Kategorie-Lösch-Dialog -->
+  <div id="deleteOverlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.3); z-index:900;"></div>
+  <div id="deleteModal" style="display:none; position:fixed; top:30%; left:50%; transform:translateX(-50%); background:white; border:1px solid #ccc; padding:1rem; z-index:1000;">
+    <h3>Preise löschen</h3>
+    <form id="deleteForm">
+      <label>Zeitraum</label>
+      <input type="text" id="deleteDates" disabled />
+      <label>Kategorie</label>
+      <select name="deleteCategory" required>
+        <option value="Standard">Standard</option>
+        <option value="Premium">Premium</option>
+        <option value="Deluxe">Deluxe</option>
+      </select>
+      <button type="submit">Löschen</button>
+      <button type="button" id="deleteCancelBtn">Abbrechen</button>
+    </form>
+  </div>
+
+  <!-- Buchungs-Bearbeitungsdialog (Beispiel) -->
+  <div id="bookingModal" style="display:none; position:fixed; top:20%; left:50%; transform:translateX(-50%); background:white; border:1px solid #ccc; padding:1rem; z-index:1001;">
+    <h3>Buchung bearbeiten</h3>
+    <form id="bookingForm">
+      <label>Titel</label>
+      <input type="text" name="title" required>
+      <label>Von</label>
+      <input type="date" name="start_date" required>
+      <label>Bis</label>
+      <input type="date" name="end_date" required>
+      <label>Name</label>
+      <input type="text" name="name" required>
+      <label>E-Mail</label>
+      <input type="email" name="email" required>
+      <label>Kategorie</label>
+      <select name="category" required>
+        <option value="Standard">Standard</option>
+        <option value="Premium">Premium</option>
+        <option value="Deluxe">Deluxe</option>
+      </select>
+      <!-- Weitere Felder nach Bedarf -->
+      <button type="submit">Speichern</button>
+      <button type="button" id="bookingDeleteBtn" style="background:#c00; color:#fff;">Löschen</button>
+      <button type="button" id="bookingCancelBtn">Abbrechen</button>
+    </form>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.18/index.global.min.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
+      let lastSelectEvent = null;
+
       const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
         initialView: 'dayGridMonth',
         selectable: true,
+        selectLongPressDelay: 1, // sofortiges Select
         height: 'auto',
         eventDisplay: 'block',
-        events: '/api/prices',
+        events: async function(fetchInfo, successCallback, failureCallback) {
+          try {
+            // Preise laden
+            const pricesRes = await fetch('/api/prices');
+            const prices = await pricesRes.json();
+
+            // Buchungen laden
+            const bookingsRes = await fetch('/api/events');
+            const bookings = await bookingsRes.json();
+
+            // Preise und Buchungen zusammenführen
+            successCallback([...prices, ...bookings]);
+          } catch (err) {
+            failureCallback(err);
+          }
+        },
         select: function (info) {
-          showModal(info.startStr, info.endStr);
+          // Prüfe, ob STRG gedrückt ist
+          if (window.event && (window.event.ctrlKey || window.event.metaKey)) {
+            // Bereichsauswahl: Dialog für Kategorie-Löschung anzeigen
+            showDeleteModal(
+              info.startStr,
+              new Date(new Date(info.endStr).getTime() - 86400000).toISOString().slice(0, 10)
+            );
+          } else {
+            // Standardfunktion: Preis-Eingabe
+            showModal(info.startStr, info.endStr);
+          }
+        },
+        eventClick: async function(info) {
+          // Prüfe, ob es eine Buchung ist (z.B. an der Farbe oder an extendedProps)
+          if (info.event.extendedProps && info.event.extendedProps.name) {
+            // Buchungsdialog öffnen und Felder befüllen
+            showBookingEditModal(info.event);
+          } else {
+            // Preis löschen (wie gehabt)
+            if (window.event && (window.event.ctrlKey || window.event.metaKey)) {
+              if (confirm(`Preis vom ${info.event.startStr} bis ${info.event.endStr || info.event.startStr} löschen?`)) {
+                const response = await fetch(`/api/prices/${info.event.id}`, {
+                  method: 'DELETE'
+                });
+                if (response.ok) {
+                  calendar.refetchEvents();
+                } else {
+                  alert('Fehler beim Löschen');
+                }
+              }
+            }
+          }
         }
       });
 
@@ -134,6 +247,119 @@
 
       document.getElementById('cancelBtn').addEventListener('click', hideModal);
       overlay.addEventListener('click', hideModal);
+
+      // --- NEU: Kategorie-Lösch-Dialog ---
+      const deleteOverlay = document.getElementById('deleteOverlay');
+      const deleteModal = document.getElementById('deleteModal');
+      const deleteForm = document.getElementById('deleteForm');
+      let deleteStart = null, deleteEnd = null;
+
+      function showDeleteModal(start, end) {
+        deleteStart = start;
+        deleteEnd = end;
+        document.getElementById('deleteDates').value = `${start} bis ${end}`;
+        deleteOverlay.style.display = 'block';
+        deleteModal.style.display = 'block';
+      }
+
+      function hideDeleteModal() {
+        deleteModal.style.display = 'none';
+        deleteOverlay.style.display = 'none';
+        deleteForm.reset();
+      }
+
+      deleteForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const category = deleteForm.deleteCategory.value;
+        if (!category) return;
+        //if (!confirm(`Alle Preise der Kategorie "${category}" vom ${deleteStart} bis ${deleteEnd} löschen?`)) return;
+
+        const response = await fetch('/api/prices', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            start_date: deleteStart,
+            end_date: deleteEnd,
+            category: category
+          })
+        });
+        if (response.ok) {
+          calendar.refetchEvents();
+          hideDeleteModal();
+        } else {
+          alert('Fehler beim Löschen');
+        }
+      });
+
+      document.getElementById('deleteCancelBtn').addEventListener('click', hideDeleteModal);
+      deleteOverlay.addEventListener('click', hideDeleteModal);
+
+      // --- NEU: Buchungs-Editier-Modal ---
+      const bookingModal = document.getElementById('bookingModal');
+      const bookingForm = document.getElementById('bookingForm');
+      const bookingDeleteBtn = document.getElementById('bookingDeleteBtn');
+      const bookingCancelBtn = document.getElementById('bookingCancelBtn');
+      let currentBookingId = null;
+
+      function showBookingEditModal(event) {
+        currentBookingId = event.id;
+        bookingForm.title.value = event.title || '';
+        bookingForm.start_date.value = event.startStr ? event.startStr.slice(0,10) : '';
+        bookingForm.end_date.value = event.endStr ? event.endStr.slice(0,10) : '';
+        bookingForm.name.value = event.extendedProps?.name || '';
+        bookingForm.email.value = event.extendedProps?.email || '';
+        // Kategorie vorbelegen: prüfe mehrere Quellen
+        const cat =
+          event.extendedProps?.category ||
+          event.category ||
+          '';
+        bookingForm.category.value = cat;
+        bookingModal.style.display = 'block';
+      }
+
+      function hideBookingModal() {
+        bookingModal.style.display = 'none';
+        bookingForm.reset();
+        currentBookingId = null;
+      }
+
+      bookingForm.onsubmit = async function(e) {
+        e.preventDefault();
+        if (!currentBookingId) return;
+        const body = {
+          title: bookingForm.title.value,
+          start_date: bookingForm.start_date.value,
+          end_date: bookingForm.end_date.value,
+          name: bookingForm.name.value,
+          email: bookingForm.email.value,
+          category: bookingForm.category.value
+        };
+        const response = await fetch(`/api/events/${currentBookingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (response.ok) {
+          calendar.refetchEvents();
+          hideBookingModal();
+        } else {
+          alert('Fehler beim Speichern');
+        }
+      };
+
+      bookingDeleteBtn.onclick = async function() {
+        if (!currentBookingId) return;
+        if (!confirm('Buchung wirklich löschen?')) return;
+        const response = await fetch(`/api/events/${currentBookingId}`, { method: 'DELETE' });
+        if (response.ok) {
+          calendar.refetchEvents();
+          hideBookingModal();
+        } else {
+          alert('Fehler beim Löschen');
+        }
+      };
+
+      bookingCancelBtn.onclick = hideBookingModal;
     });
   </script>
 </body>

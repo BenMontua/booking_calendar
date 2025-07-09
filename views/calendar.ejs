@@ -121,7 +121,7 @@
             const end = new Date(ev.end || ev.start);
             for (
               let d = new Date(start);
-              d <= end;
+              d < end; // nur bis einen Tag vor end
               d.setDate(d.getDate() + 1)
             ) {
               bookedDays.add(d.toISOString().slice(0, 10));
@@ -143,9 +143,9 @@
             return true;
           }).map(price => {
             let color;
-            if (price.title.startsWith('Standard')) color = '#90ee90';
-            else if (price.title.startsWith('Premium')) color = '#87ceeb';
-            else if (price.title.startsWith('Deluxe')) color = '#ffc107';
+            if (price.title.startsWith('Standard')) color = '#4abcf9';
+            else if (price.title.startsWith('Premium')) color = '#8300c4';
+            else if (price.title.startsWith('Deluxe')) color = '#aaa7cc';
             else color = '#e0e0e0';
 
             return {
@@ -165,6 +165,17 @@
       select: function(info) {
         startDate = info.startStr;
         endDate = info.endStr;
+
+        // Prüfe, ob mindestens 2 Tage ausgewählt wurden
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const diffDays = (end - start) / (1000 * 60 * 60 * 24);
+
+        if (startDate === endDate || diffDays <= 1) {
+          alert('Bitte wähle mindestens 2 Tage (=1 Nacht) für eine Buchung aus.');
+          return;
+        }
+
         // Prüfe, ob die Auswahl mit bestehenden Events kollidiert
         axios.get('/api/events').then(res => {
           const events = res.data;
@@ -175,7 +186,7 @@
             const end = new Date(ev.end || ev.start);
             for (
               let d = new Date(start);
-              d <= end;
+              d < end; // nur bis einen Tag vor end
               d.setDate(d.getDate() + 1)
             ) {
               bookedDays.add(d.toISOString().slice(0, 10));

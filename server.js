@@ -56,8 +56,10 @@ app.get('/api/events', (req, res) => {
     title: b.title,
     start: b.start_date,
     end: b.end_date,
-    backgroundColor: '#faa',
-    extendedProps: { name: b.name, email: b.email, total_price: b.total_price }
+    backgroundColor: '#fbceb1',
+    textColor: '#222',
+    category: b.category, // <-- HIER
+    extendedProps: { name: b.name, email: b.email, total_price: b.total_price, category: b.category } // <-- HIER
   }));
   res.json(events);
 });
@@ -72,6 +74,7 @@ app.get('/api/prices', (req, res) => {
 
   const rows = db.prepare('SELECT * FROM prices').all();
   const events = rows.map(p => ({
+    id: p.id, // <-- ID hinzufügen!
     title: `${p.category}: ${p.price.toFixed(2)} €`,
     start: p.date,
     end: p.date,
@@ -89,7 +92,6 @@ app.post('/api/prices', (req, res) => {
       return res.status(400).json({ error: 'Ungültige Eingabedaten' });
     }
 
-    const stmt = db.prepare('INSERT INTO prices (date, category, price) VALUES (?, ?, ?)');
     const start = new Date(start_date);
     const end = new Date(end_date);
 
@@ -105,13 +107,21 @@ app.post('/api/prices', (req, res) => {
       current.setDate(current.getDate() + 1);
     }
 
-    const insertMany = db.transaction((rows) => {
+    const insertOrUpdate = db.transaction((rows) => {
       for (const date of rows) {
-        stmt.run(date, category, price);
+        // Prüfen, ob bereits ein Eintrag existiert
+        const existing = db.prepare('SELECT id FROM prices WHERE date = ? AND category = ?').get(date, category);
+        if (existing) {
+          // Update, falls vorhanden
+          db.prepare('UPDATE prices SET price = ? WHERE id = ?').run(price, existing.id);
+        } else {
+          // Sonst neu einfügen
+          db.prepare('INSERT INTO prices (date, category, price) VALUES (?, ?, ?)').run(date, category, price);
+        }
       }
     });
 
-    insertMany(dates);
+    insertOrUpdate(dates);
 
     res.json({ success: true, inserted: dates.length });
   } catch (err) {
@@ -120,6 +130,36 @@ app.post('/api/prices', (req, res) => {
   }
 });
 
+// Preis löschen per ID
+app.delete('/api/prices/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    const stmt = db.prepare('DELETE FROM prices WHERE id = ?');
+    const result = stmt.run(id);
+    if (result.changes > 0) {
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ error: 'Preis nicht gefunden' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Löschen' });
+  }
+});
+
+// Preise im Zeitraum und Kategorie löschen
+app.delete('/api/prices', (req, res) => {
+  try {
+    const { start_date, end_date, category } = req.body;
+    if (!start_date || !end_date || !category) {
+      return res.status(400).json({ error: 'Ungültige Eingabedaten' });
+    }
+    const stmt = db.prepare('DELETE FROM prices WHERE date >= ? AND date <= ? AND category = ?');
+    const result = stmt.run(start_date, end_date, category);
+    res.json({ success: true, deleted: result.changes });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Löschen' });
+  }
+});
 
 // Buchung speichern & E-Mail senden
 app.post('/api/events', async (req, res) => {
@@ -212,6 +252,37 @@ app.get('/admin', (req, res) => {
 // Buchungsseite anzeigen
 app.get('/', (req, res) => {
   res.render('calendar');
+});
+
+// Buchung aktualisieren
+app.put('/api/events/:id', (req, res) => {
+  try {
+    const { title, start_date, end_date, name, email, category } = req.body;
+    const stmt = db.prepare('UPDATE bookings SET title = ?, start_date = ?, end_date = ?, name = ?, email = ?, category = ? WHERE id = ?');
+    const result = stmt.run(title, start_date, end_date, name, email, category, req.params.id);
+    if (result.changes > 0) {
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ error: 'Buchung nicht gefunden' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  }
+});
+
+// Buchung löschen
+app.delete('/api/events/:id', (req, res) => {
+  try {
+    const stmt = db.prepare('DELETE FROM bookings WHERE id = ?');
+    const result = stmt.run(req.params.id);
+    if (result.changes > 0) {
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ error: 'Buchung nicht gefunden' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Löschen' });
+  }
 });
 
 app.listen(3000, () => console.log('Server auf http://localhost:3000'));
