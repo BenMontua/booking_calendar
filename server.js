@@ -65,9 +65,9 @@ app.get('/api/events', (req, res) => {
 // Preise abrufen – gestapelt, farbig pro Kategorie
 app.get('/api/prices', (req, res) => {
   const colorMap = {
-    Standard: '#add8e6', // hellblau
-    Premium: '#90ee90',  // hellgrün
-    Deluxe: '#fdd9b5'    // orange-beige
+    Standard: '#4abcf9', // blau
+    Premium: '#8300c4',  // lila
+    Deluxe: '#aaa7cc'    // grau
   };
 
   const rows = db.prepare('SELECT * FROM prices').all();
@@ -120,10 +120,11 @@ app.post('/api/prices', (req, res) => {
   }
 });
 
+
 // Buchung speichern & E-Mail senden
 app.post('/api/events', async (req, res) => {
   try {
-    const { title, start_date, end_date, name, email, category } = req.body;
+    const { title, start_date, end_date, name, email, category, guests, bettwaesche, haustiere } = req.body;
     const start = new Date(start_date);
     const end = new Date(end_date);
     let current = new Date(start);
@@ -133,14 +134,19 @@ app.post('/api/events', async (req, res) => {
     while (current < end) {
       const dateStr = current.toISOString().slice(0, 10);
       const priceEntry = dayPricesStmt.get(dateStr, category);
+      if (haustiere) priceEntry.price *= 1.11;
       if (priceEntry) sum += priceEntry.price;
       current.setDate(current.getDate() + 1);
     }
     sum += FIXKOSTEN.reinigung + FIXKOSTEN.bettwaesche;
 
+    ////sum += 15 * guests; // pro Person
+    ////if (bettwaesche) sum += 10 * guests;
+   
     const insert = db.prepare('INSERT INTO bookings (title, start_date, end_date, name, email, category, total_price) VALUES (?, ?, ?, ?, ?, ?, ?)');
     const info = insert.run(title, start_date, end_date, name, email, category, sum);
 
+    
     // E-Mail senden
     const mailOptions = {
       from: '"Buchungsportal" <no-reply@deine-domain.de>',
@@ -161,7 +167,7 @@ Mit freundlichen Grüßen,
 Ihr Buchungsteam`
     };
 
-    await transporter.sendMail(mailOptions);
+    ////await transporter.sendMail(mailOptions);
 
     res.json({ success: true, total_price: sum });
   } catch (err) {

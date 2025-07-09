@@ -1,122 +1,288 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="UTF-8">
   <title>Buchungskalender</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 1rem;
-    }
-    #calendar {
-      max-width: 900px;
-      margin: 0 auto;
-    }
-    .fc-event-title {
-      white-space: normal;
-    }
-    .modal {
-      display: none;
+    body { font-family: sans-serif; margin: 0; padding: 0; }
+    #calendar { max-width: 900px; margin: 40px auto; }
+    .form-overlay {
       position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
       z-index: 1000;
-      left: 0; top: 0; width: 100%; height: 100%;
-      background-color: rgba(0,0,0,0.4);
     }
-    .modal-content {
-      background-color: #fff;
-      margin: 15% auto;
+    .form-container {
+      background: white;
       padding: 20px;
-      border-radius: 5px;
-      width: 300px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      width: 90%;
+      max-width: 600px;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+      position: relative;
+    }
+    .form-group { margin-bottom: 10px; }
+    label { display: block; margin-bottom: 4px; }
+    input, select { width: 100%; padding: 6px; }
+    button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    .close-button {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #ccc;
+      border: none;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      font-size: 16px;
+      line-height: 30px;
+      text-align: center;
+      cursor: pointer;
     }
   </style>
 </head>
 <body>
-  <h1>Buchungskalender</h1>
-  <div id="calendar"></div>
+  <div id='calendar'></div>
 
-  <!-- Modal -->
-  <div class="modal" id="bookingModal">
-    <div class="modal-content">
-      <h3>Neue Buchung</h3>
-      <form id="bookingForm">
-        <input type="hidden" id="start_date" name="start_date" />
-        <input type="hidden" id="end_date" name="end_date" />
-        <label>Titel:<br/><input type="text" name="title" required/></label><br/>
-        <label>Name:<br/><input type="text" name="name" required/></label><br/>
-        <label>E-Mail:<br/><input type="email" name="email" required/></label><br/>
-        <label>Kategorie:<br/>
-          <select name="category" required>
-            <option value="A">Kategorie A</option>
-            <option value="B">Kategorie B</option>
-            <option value="C">Kategorie C</option>
-          </select>
-        </label><br/><br/>
-        <button type="submit">Buchen</button>
-        <button type="button" onclick="closeModal()">Abbrechen</button>
-      </form>
+  <div id="formOverlay" class="form-overlay" style="display: none;">
+    <div class="form-container" id="bookingForm">
+      <button class="close-button" onclick="closeForm()">&times;</button>
+      <h3>Buchung erstellen</h3>
+      <div class="form-group">
+        <label for="title">Titel</label>
+        <input type="text" id="title" />
+      </div>
+      <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" />
+      </div>
+      <div class="form-group">
+        <label for="email">E-Mail</label>
+        <input type="email" id="email" />
+      </div>
+      <div class="form-group">
+        <label for="category">Kategorie</label>
+        <select id="category" onchange="calculatePrice()">
+          <option>Standard</option>
+          <option>Premium</option>
+          <option>Deluxe</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="guests">Anzahl Personen</label>
+        <input type="number" id="guests" value="1" min="1" onchange="calculatePrice()" />
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="optionBettwaesche" checked onchange="calculatePrice()" /> Bettwäsche (+10€/Person)</label>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="optionHaustiere" onchange="calculatePrice()" /> Haustiere (+11% auf Tagespreis)</label>
+      </div>
+      <div class="form-group">
+        <label for="start">Startdatum</label>
+        <input type="text" id="start" readonly />
+      </div>
+      <div class="form-group">
+        <label for="end">Enddatum</label>
+        <input type="text" id="end" readonly />
+      </div>
+      <button onclick="submitBooking()">Buchung abschicken</button>
+      <p id="totalPrice"></p>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.18/index.global.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
   <script>
-    const calendarEl = document.getElementById('calendar');
+    let startDate, endDate;
+    const FIXKOSTEN = { reinigung: 40, bettwaesche: 10, proPerson: 15 };
 
-    const calendar = new FullCalendar.Calendar(calendarEl, {
-      initialView: 'dayGridMonth',
+    const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
       selectable: true,
-      selectMirror: true,
-      height: "auto",
-      events: [
-        '/api/prices',
-        '/api/events'
-      ],
-      select: function(info) {
-        document.getElementById('start_date').value = info.startStr;
-        document.getElementById('end_date').value = info.endStr;
-        openModal();
+      initialView: 'dayGridMonth',
+      locale: 'de',
+      events: async function(fetchInfo, successCallback, failureCallback) {
+        try {
+          const [eventsRes, pricesRes] = await Promise.all([
+            axios.get('/api/events'),
+            axios.get('/api/prices')
+          ]);
+          const events = eventsRes.data;
+
+          // Alle belegten Tage sammeln (YYYY-MM-DD)
+          const bookedDays = new Set();
+          events.forEach(ev => {
+            const start = new Date(ev.start);
+            const end = new Date(ev.end || ev.start);
+            for (
+              let d = new Date(start);
+              d <= end;
+              d.setDate(d.getDate() + 1)
+            ) {
+              bookedDays.add(d.toISOString().slice(0, 10));
+            }
+          });
+
+          // Preise nur für freie Tage anzeigen
+          const priceEvents = pricesRes.data.filter(price => {
+            // Prüfe, ob der Preiszeitraum mit einem belegten Tag kollidiert
+            const start = new Date(price.start);
+            const end = new Date(price.end || price.start);
+            for (
+              let d = new Date(start);
+              d <= end;
+              d.setDate(d.getDate() + 1)
+            ) {
+              if (bookedDays.has(d.toISOString().slice(0, 10))) return false;
+            }
+            return true;
+          }).map(price => {
+            let color;
+            if (price.title.startsWith('Standard')) color = '#90ee90';
+            else if (price.title.startsWith('Premium')) color = '#87ceeb';
+            else if (price.title.startsWith('Deluxe')) color = '#ffc107';
+            else color = '#e0e0e0';
+
+            return {
+              title: price.title,
+              start: price.start,
+              end: price.end,
+              backgroundColor: color,
+              borderColor: color
+            };
+          });
+
+          successCallback([...events, ...priceEvents]);
+        } catch (err) {
+          failureCallback(err);
+        }
       },
-      eventDisplay: 'block'
-    });
+      select: function(info) {
+        startDate = info.startStr;
+        endDate = info.endStr;
+        // Prüfe, ob die Auswahl mit bestehenden Events kollidiert
+        axios.get('/api/events').then(res => {
+          const events = res.data;
+          // Alle belegten Tage sammeln
+          const bookedDays = new Set();
+          events.forEach(ev => {
+            const start = new Date(ev.start);
+            const end = new Date(ev.end || ev.start);
+            for (
+              let d = new Date(start);
+              d <= end;
+              d.setDate(d.getDate() + 1)
+            ) {
+              bookedDays.add(d.toISOString().slice(0, 10));
+            }
+          });
 
-    calendar.render();
-
-    function openModal() {
-      document.getElementById('bookingModal').style.display = 'block';
-    }
-
-    function closeModal() {
-      document.getElementById('bookingModal').style.display = 'none';
-    }
-
-    document.getElementById('bookingForm').addEventListener('submit', async function (e) {
-      e.preventDefault();
-      const form = e.target;
-      const data = {
-        title: form.title.value,
-        start_date: form.start_date.value,
-        end_date: form.end_date.value,
-        name: form.name.value,
-        email: form.email.value,
-        category: form.category.value
-      };
-
-      const res = await fetch('/api/events', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-
-      const json = await res.json();
-      if (json.success) {
-        alert('Buchung erfolgreich! Preis: ' + json.total_price.toFixed(2) + ' €');
-        closeModal();
-        calendar.refetchEvents();
-      } else {
-        alert('Fehler: ' + json.error);
+          // Prüfe, ob die Auswahl mit mehr als einem Tag überlappt
+          let overlapCount = 0;
+          let d = new Date(startDate);
+          const endD = new Date(endDate);
+          while (d < endD) {
+            if (bookedDays.has(d.toISOString().slice(0, 10))) overlapCount++;
+            d.setDate(d.getDate() + 1);
+          }
+          if (overlapCount > 1) {
+            alert('Die Auswahl überschneidet sich mit bestehenden Buchungen an mehr als einem Tag.');
+            return;
+          }
+          document.getElementById('start').value = startDate;
+          document.getElementById('end').value = endDate;
+          document.getElementById('formOverlay').style.display = 'flex';
+          calculatePrice();
+        });
       }
     });
+    calendar.render();
+
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') closeForm();
+    });
+
+    document.getElementById('formOverlay').addEventListener('click', function(event) {
+      if (event.target.id === 'formOverlay') closeForm();
+    });
+
+    async function calculatePrice() {
+      const category = document.getElementById('category').value;
+      const guests = parseInt(document.getElementById('guests').value);
+      const bettwaesche = document.getElementById('optionBettwaesche').checked;
+      const haustiere = document.getElementById('optionHaustiere').checked;
+      if (!startDate || !endDate) return;
+
+      try {
+        const priceRes = await axios.get('/api/prices');
+        const days = getDateRange(new Date(startDate), new Date(endDate));
+        let sum = 0;
+        for (const day of days) {
+          const entry = priceRes.data.find(p => p.start === day && p.title.startsWith(category));
+          if (entry) {
+            let priceStr = entry.title.split(':')[1].replace('€', '').trim();
+            let base = parseFloat(priceStr);
+            if (haustiere) base *= 1.11;
+            sum += base;
+          }
+        }
+        sum += FIXKOSTEN.reinigung;
+        if (bettwaesche) sum += FIXKOSTEN.bettwaesche * guests;
+        sum += FIXKOSTEN.proPerson * guests;
+
+        document.getElementById('totalPrice').innerText = `Gesamtpreis: ${sum.toFixed(2)} €`;
+      } catch (err) {
+        console.error('Fehler bei Preisberechnung:', err);
+      }
+    }
+
+    async function submitBooking() {
+      const data = {
+        title: document.getElementById('title').value,
+        name: document.getElementById('name').value,
+        email: document.getElementById('email').value,
+        category: document.getElementById('category').value,
+        guests: parseInt(document.getElementById('guests').value),
+        bettwaesche: document.getElementById('optionBettwaesche').checked,
+        haustiere: document.getElementById('optionHaustiere').checked,
+        start_date: startDate,
+        end_date: endDate
+      };
+
+      try {
+        const payload = { ...data };
+        delete payload.guests;
+        delete payload.bettwaesche;
+        delete payload.haustiere;
+
+        const res = await axios.post('/api/events', payload);
+        document.getElementById('totalPrice').innerText = `Gesamtpreis: ${res.data.total_price.toFixed(2)} €`;
+        calendar.refetchEvents();
+        document.getElementById('formOverlay').style.display = 'none';
+      } catch (err) {
+        alert('Fehler beim Buchen.');
+        console.error(err);
+      }
+    }
+
+    function getDateRange(start, end) {
+      const dates = [];
+      let current = new Date(start);
+      while (current < end) {
+        dates.push(current.toISOString().slice(0, 10));
+        current.setDate(current.getDate() + 1);
+      }
+      return dates;
+    }
+
+    function closeForm() {
+      document.getElementById('formOverlay').style.display = 'none';
+    }
   </script>
 </body>
 </html>
