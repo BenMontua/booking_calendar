@@ -20,15 +20,15 @@
             ],
             "program": "${workspaceFolder}/server.js"
         }
-        ],
-        "compounds": [
-        {
-            "name": "Start frontend and backend",
-            "configurations": [
-            "Launch booking",
-            "Launch backend"
-            ]
-        }
+    ],
+    "compounds": [
+    {
+        "name": "Start frontend and backend",
+        "configurations": [
+        "Launch booking",
+        "Launch backend"
         ]
+    }
     ]
+
 }
