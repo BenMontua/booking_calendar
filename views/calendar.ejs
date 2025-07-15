@@ -54,23 +54,18 @@
       <button class="close-button" onclick="closeForm()">&times;</button>
       <h3>Buchung erstellen</h3>
       <div class="form-group">
-        <label for="title">Titel</label>
-        <input type="text" id="title" />
-      </div>
-      <div class="form-group">
-        <label for="name">Name</label>
+        <label for="name">Vorname + Nachname</label>
         <input type="text" id="name" />
       </div>
       <div class="form-group">
         <label for="email">E-Mail</label>
-        <input type="email" id="email" />
+        <input type="email" id="email" required />
       </div>
       <div class="form-group">
         <label for="category">Kategorie</label>
         <select id="category" onchange="calculatePrice()">
-          <option>Standard</option>
-          <option>Premium</option>
-          <option>Deluxe</option>
+          <option>6 Personen Haus</option>
+          <option>4 Personen Haus</option>
         </select>
       </div>
       <div class="form-group">
@@ -78,7 +73,11 @@
         <input type="number" id="guests" value="1" min="1" onchange="calculatePrice()" />
       </div>
       <div class="form-group">
-        <label><input type="checkbox" id="optionHaustiere" onchange="calculatePrice()" /> Haustiere (+11% auf Tagespreis)</label>
+        <label style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;">
+          Wir bringen auch Haustiere mit
+          <input type="checkbox" id="optionHaustiere" onchange="calculatePrice()" style="margin:0;" />
+        </label>
+        <p style="font-size: 0.8em;">Maximal sind 2 Hunde erlaubt - für Ausnahmen sprecht uns gerne separat an</p>
       </div>
       <div class="form-group">
         <label for="start">Startdatum</label>
@@ -88,9 +87,10 @@
         <label for="end">Enddatum</label>
         <input type="text" id="end" readonly />
       </div>
-      <button onclick="submitBooking()">Buchung abschicken</button>
       <p id="bettwaescheSum"></p>
+      <p>Endreinigung: 100€</p>
       <p id="totalPrice"></p>
+      <button onclick="submitBooking()">Buchung abschicken</button>
     </div>
   </div>
 
@@ -140,18 +140,12 @@
             }
             return true;
           }).map(price => {
-            let color;
-            if (price.title.startsWith('Standard')) color = '#4abcf9';
-            else if (price.title.startsWith('Premium')) color = '#8300c4';
-            else if (price.title.startsWith('Deluxe')) color = '#aaa7cc';
-            else color = '#e0e0e0';
-
             return {
               title: price.title,
               start: price.start,
               end: price.end,
-              backgroundColor: color,
-              borderColor: color
+              backgroundColor: price.backgroundColor,
+              borderColor: price.backgroundColor
             };
           });
 
@@ -221,7 +215,10 @@
     });
 
     async function calculatePrice() {
-      const category = document.getElementById('category').value;
+      var category = document.getElementById('category').value;
+      if(category === '6 Personen Haus') category = '6er Haus';
+      else if(category === '4 Personen Haus') category = '4er Haus';  
+
       const guests = parseInt(document.getElementById('guests').value);
       const haustiere = document.getElementById('optionHaustiere').checked;
       if (!startDate || !endDate) return;
@@ -247,17 +244,29 @@
         // Bettwäsche-Summe anzeigen
         document.getElementById('bettwaescheSum').innerText = `Bettwäsche + Kurtaxe (p. P. 15€) - Summe: ${bettwaescheSum.toFixed(2)} €`;
 
-        document.getElementById('totalPrice').innerText = `Gesamtpreis: ${sum.toFixed(2)} €`;
+        document.getElementById('totalPrice').innerHTML = `<b>Gesamtpreis: ${sum.toFixed(2)} €</b>`;
       } catch (err) {
         console.error('Fehler bei Preisberechnung:', err);
       }
     }
 
     async function submitBooking() {
+      const email = document.getElementById('email').value.trim();
+
+      // E-Mail-Validierung: nicht leer, enthält @ und Punkt
+      if (!email) {
+        alert('Bitte gib eine E-Mail-Adresse an.');
+        return;
+      }
+      if (!email.includes('@') || !email.includes('.')) {
+        alert('Bitte gib eine gültige E-Mail-Adresse ein.');
+        return;
+      }
+
       const data = {
-        title: document.getElementById('title').value,
+        title: "Gebucht",
         name: document.getElementById('name').value,
-        email: document.getElementById('email').value,
+        email: email,
         category: document.getElementById('category').value,
         guests: parseInt(document.getElementById('guests').value),
         haustiere: document.getElementById('optionHaustiere').checked,

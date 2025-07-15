@@ -67,9 +67,8 @@ app.get('/api/events', (req, res) => {
 // Preise abrufen – gestapelt, farbig pro Kategorie
 app.get('/api/prices', (req, res) => {
   const colorMap = {
-    Standard: '#4abcf9', // blau
-    Premium: '#8300c4',  // lila
-    Deluxe: '#aaa7cc'    // grau
+    "6er Haus": '#4abcf9', // blau
+    "4er Haus": '#8300c4'  // lila
   };
 
   const rows = db.prepare('SELECT * FROM prices').all();
