@@ -78,9 +78,6 @@
         <input type="number" id="guests" value="1" min="1" onchange="calculatePrice()" />
       </div>
       <div class="form-group">
-        <label><input type="checkbox" id="optionBettwaesche" checked onchange="calculatePrice()" /> Bettwäsche (+10€/Person)</label>
-      </div>
-      <div class="form-group">
         <label><input type="checkbox" id="optionHaustiere" onchange="calculatePrice()" /> Haustiere (+11% auf Tagespreis)</label>
       </div>
       <div class="form-group">
@@ -92,6 +89,7 @@
         <input type="text" id="end" readonly />
       </div>
       <button onclick="submitBooking()">Buchung abschicken</button>
+      <p id="bettwaescheSum"></p>
       <p id="totalPrice"></p>
     </div>
   </div>
@@ -100,7 +98,7 @@
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
   <script>
     let startDate, endDate;
-    const FIXKOSTEN = { reinigung: 40, bettwaesche: 10, proPerson: 15 };
+    const FIXKOSTEN = { reinigung: 100, bettwaesche: 15, proPerson: 0 };
 
     const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
       selectable: true,
@@ -225,7 +223,6 @@
     async function calculatePrice() {
       const category = document.getElementById('category').value;
       const guests = parseInt(document.getElementById('guests').value);
-      const bettwaesche = document.getElementById('optionBettwaesche').checked;
       const haustiere = document.getElementById('optionHaustiere').checked;
       if (!startDate || !endDate) return;
 
@@ -243,8 +240,12 @@
           }
         }
         sum += FIXKOSTEN.reinigung;
-        if (bettwaesche) sum += FIXKOSTEN.bettwaesche * guests;
+        const bettwaescheSum = FIXKOSTEN.bettwaesche * guests;
+        sum += bettwaescheSum;
         sum += FIXKOSTEN.proPerson * guests;
+
+        // Bettwäsche-Summe anzeigen
+        document.getElementById('bettwaescheSum').innerText = `Bettwäsche + Kurtaxe (p. P. 15€) - Summe: ${bettwaescheSum.toFixed(2)} €`;
 
         document.getElementById('totalPrice').innerText = `Gesamtpreis: ${sum.toFixed(2)} €`;
       } catch (err) {
@@ -259,7 +260,6 @@
         email: document.getElementById('email').value,
         category: document.getElementById('category').value,
         guests: parseInt(document.getElementById('guests').value),
-        bettwaesche: document.getElementById('optionBettwaesche').checked,
         haustiere: document.getElementById('optionHaustiere').checked,
         start_date: startDate,
         end_date: endDate
