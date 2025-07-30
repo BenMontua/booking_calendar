@@ -80,8 +80,8 @@
       <input type="text" id="modalDates" disabled />
       <label>Kategorie</label>
       <select name="category">
-        <option value="6er Haus">6er Haus</option>
-        <option value="4er Haus">4er Haus</option>
+        <option value="Category1">Standard</option>
+        <option value="Category2">Mit Haustier</option>
       </select>
       <label>Preis (€)</label>
       <input type="number" name="price" step="0.01" required />
@@ -101,8 +101,8 @@
       <input type="text" id="deleteDates" disabled />
       <label>Kategorie</label>
       <select name="deleteCategory" required>
-        <option value="6er Haus">6er Haus</option>
-        <option value="4er Haus">4er Haus</option>
+        <option value="Category1">Standard</option>
+        <option value="Category2">Mit Haustier</option>
       </select>
       <button type="submit">Löschen</button>
       <button type="button" id="deleteCancelBtn">Abbrechen</button>
@@ -125,8 +125,8 @@
       <input type="email" name="email" required>
       <label>Kategorie</label>
       <select name="category" required>
-        <option value="6 Personen Haus">6 Personen Haus</option>
-        <option value="4 Personen Haus">4 Personen Haus</option>
+        <option value="Category1">Standard</option>
+        <option value="Category2">Mit Haustier</option>
       </select>
       <!-- Weitere Felder nach Bedarf -->
       <button type="submit">Speichern</button>
@@ -167,8 +167,16 @@
           if (arg.event.extendedProps && arg.event.extendedProps.name) {
             return { html: `${arg.event.extendedProps.name}` };
           }
-          // Sonst Standard (z.B. Titel)
-          return { html: arg.event.title };
+
+          let title = "Standard";
+          // Sonst Category1 (z.B. Titel)
+          if (arg.event.extendedProps && arg.event.extendedProps.price && arg.event.extendedProps.priceCategory) {
+            title = "Standard: " + arg.event.extendedProps.price;
+            if (arg.event.extendedProps.priceCategory === 'Category2') {
+              title = "Mit Haustier: " + arg.event.extendedProps.price;
+            }
+          }
+          return { html: title };
         },
         select: function (info) {
           // Prüfe, ob STRG gedrückt ist
@@ -179,7 +187,7 @@
               new Date(new Date(info.endStr).getTime() - 86400000).toISOString().slice(0, 10)
             );
           } else {
-            // Standardfunktion: Preis-Eingabe
+            // Category1funktion: Preis-Eingabe
             showModal(info.startStr, info.endStr);
           }
         },
@@ -315,8 +323,8 @@
         bookingForm.email.value = event.extendedProps?.email || '';
         // Kategorie vorbelegen: prüfe mehrere Quellen und gleiche auf die neuen Werte ab
         let cat = event.extendedProps?.category || event.category || '';
-        if (cat === '6er Haus') cat = '6 Personen Haus';
-        if (cat === '4er Haus') cat = '4 Personen Haus';
+        if (cat === 'Category1') cat = 'Standard';
+        else if (cat === 'Category2') cat = 'Mit Haustier';
         bookingForm.category.value = cat;
         bookingModal.style.display = 'block';
       }

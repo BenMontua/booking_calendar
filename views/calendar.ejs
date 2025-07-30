@@ -4,8 +4,24 @@
   <meta charset="UTF-8">
   <title>Buchungskalender</title>
   <style>
-    body { font-family: sans-serif; margin: 0; padding: 0; }
-    #calendar { max-width: 900px; margin: 40px auto; }
+    body { 
+      font-family: sans-serif; 
+      margin: 0; 
+      padding: 0; 
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      background: #f9f9f9;
+    }
+    #calendar {
+      width: 90vw;
+      max-width: 90vw;
+      margin: 40px 0;
+    }
+    .fc-multimonth {
+      width: 100% !important;
+    }
     .form-overlay {
       position: fixed;
       top: 0; left: 0;
@@ -64,8 +80,8 @@
       <div class="form-group">
         <label for="category">Kategorie</label>
         <select id="category" onchange="calculatePrice()">
-          <option>6 Personen Haus</option>
-          <option>4 Personen Haus</option>
+          <option>Standard</option>
+          <option>Mit Haustier</option>
         </select>
       </div>
       <div class="form-group">
@@ -102,8 +118,14 @@
 
     const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
       selectable: true,
-      initialView: 'dayGridMonth',
+      initialView: 'multiMonthYear',
       locale: 'de',
+      views: {
+        multiMonthYear: {
+          type: 'multiMonth',
+          monthCount: 2 // Nur 2 Monate anzeigen
+        }
+      },
       events: async function(fetchInfo, successCallback, failureCallback) {
         try {
           const [eventsRes, pricesRes] = await Promise.all([
@@ -140,8 +162,17 @@
             }
             return true;
           }).map(price => {
+
+            let title = "Standard";
+            // Sonst Category1 (z.B. Titel)
+            if (price.extendedProps && price.extendedProps.price && price.extendedProps.priceCategory) {
+              title = "Standard: " + price.extendedProps.price;
+              if (price.extendedProps.priceCategory === 'Category2') {
+                title = "Mit Haustier: " + price.extendedProps.price;
+              }
+            }
             return {
-              title: price.title,
+              title: title,
               start: price.start,
               end: price.end,
               backgroundColor: price.backgroundColor,
@@ -216,11 +247,11 @@
 
     async function calculatePrice() {
       var category = document.getElementById('category').value;
-      if(category === '6 Personen Haus') category = '6er Haus';
-      else if(category === '4 Personen Haus') category = '4er Haus';  
+      if(category === 'Standard') category = 'Category1';
+      else if(category === 'Mit Haustier') category = 'Category2';
 
       const guests = parseInt(document.getElementById('guests').value);
-      const haustiere = document.getElementById('optionHaustiere').checked;
+      const haustiere= document.getElementById('optionHaustiere').checked;
       if (!startDate || !endDate) return;
 
       try {
@@ -228,9 +259,9 @@
         const days = getDateRange(new Date(startDate), new Date(endDate));
         let sum = 0;
         for (const day of days) {
-          const entry = priceRes.data.find(p => p.start === day && p.title.startsWith(category));
+          const entry = priceRes.data.find(p => p.start === day && p.extendedProps.priceCategory && p.extendedProps.priceCategory.startsWith(category));
           if (entry) {
-            let priceStr = entry.title.split(':')[1].replace('€', '').trim();
+            let priceStr = entry.extendedProps.price.replace('€', '').trim();
             let base = parseFloat(priceStr);
             if (haustiere) base *= 1.11;
             sum += base;
@@ -242,7 +273,10 @@
         sum += FIXKOSTEN.proPerson * guests;
 
         // Bettwäsche-Summe anzeigen
-        document.getElementById('bettwaescheSum').innerText = `Bettwäsche + Kurtaxe (p. P. 15€) - Summe: ${bettwaescheSum.toFixed(2)} €`;
+        const bettwaescheSumElem = document.getElementById('bettwaescheSum');
+        if (bettwaescheSumElem) {
+          bettwaescheSumElem.innerText = `Bettwäsche + Kurtaxe (p. P. 15€) - Summe: ${bettwaescheSum.toFixed(2)} €`;
+        }
 
         document.getElementById('totalPrice').innerHTML = `<b>Gesamtpreis: ${sum.toFixed(2)} €</b>`;
       } catch (err) {
@@ -278,7 +312,7 @@
         const payload = { ...data };
         delete payload.guests;
         delete payload.bettwaesche;
-        delete payload.haustiere;
+        delete payload.Category2e;
 
         const res = await axios.post('/api/events', payload);
         document.getElementById('totalPrice').innerText = `Gesamtpreis: ${res.data.total_price.toFixed(2)} €`;

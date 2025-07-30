@@ -67,17 +67,17 @@ app.get('/api/events', (req, res) => {
 // Preise abrufen – gestapelt, farbig pro Kategorie
 app.get('/api/prices', (req, res) => {
   const colorMap = {
-    "6er Haus": '#4abcf9', // blau
-    "4er Haus": '#8300c4'  // lila
+    "Category1": '#4abcf9', // blau
+    "Category2": '#8300c4'  // lila
   };
 
   const rows = db.prepare('SELECT * FROM prices').all();
   const events = rows.map(p => ({
     id: p.id, // <-- ID hinzufügen!
-    title: `${p.category}: ${p.price.toFixed(2)} €`,
     start: p.date,
     end: p.date,
-    backgroundColor: colorMap[p.category] || '#eef'
+    backgroundColor: colorMap[p.category] || '#eef',
+    extendedProps: { price: `${p.price.toFixed(2)} €`, priceCategory: p.category } // <-- HIER
   }));
   res.json(events);
 });
@@ -163,10 +163,12 @@ app.delete('/api/prices', (req, res) => {
 // Buchung speichern & E-Mail senden
 app.post('/api/events', async (req, res) => {
   try {
-    const { title, start_date, end_date, name, email, category, guests, bettwaesche, haustiere } = req.body;
+    const { title, start_date, end_date, name, email, categoryIn, guests, bettwaesche, haustiere } = req.body;
     const start = new Date(start_date);
     const end = new Date(end_date);
     let current = new Date(start);
+
+    let category = categoryIn === 'Mit Haustier' ? 'Category2' : 'Category1';
 
     const dayPricesStmt = db.prepare('SELECT price FROM prices WHERE date = ? AND category = ?');
     let sum = 0;
