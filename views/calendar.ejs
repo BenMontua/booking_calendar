@@ -17,6 +17,7 @@
     #calendar {
       width: 90vw;
       max-width: 90vw;
+      max-height: 90vh;
       margin: 40px 0;
     }
     .fc-multimonth {
@@ -50,15 +51,29 @@
       position: absolute;
       top: 10px;
       right: 10px;
-      background: #ccc;
+      background: #a28c89;
+      color: #fff;
       border: none;
       border-radius: 50%;
-      width: 30px;
-      height: 30px;
-      font-size: 16px;
-      line-height: 30px;
-      text-align: center;
+      width: 32px;
+      height: 32px;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      transition: background 0.2s;
+      padding: 0;
+    }
+    .close-button:hover {
+      background: #c0392b;
+    }
+    .fc-event-title,
+    .fc-event .fc-event-title {
+      text-align: center;
+      width: 100%;
+      display: block;
     }
   </style>
 </head>
@@ -75,18 +90,24 @@
       </div>
       <div class="form-group">
         <label for="email">E-Mail</label>
-        <input type="email" id="email" required />
+        <input type="email" id="email" required onblur="validateEmail()" oninput="validateEmail()" />
+        <span id="emailError" style="color:#c00; font-size:0.9em; display:none;"></span>
       </div>
       <div class="form-group">
+      <!--  
         <label for="category">Kategorie</label>
         <select id="category" onchange="calculatePrice()">
           <option>Standard</option>
           <option>Mit Haustier</option>
         </select>
+      -->
+        <!-- Kategorie Dropdown entfernt, Standard wird gesetzt -->
+        <input type="hidden" id="category" value="Standard" />
+
       </div>
       <div class="form-group">
         <label for="guests">Anzahl Personen</label>
-        <input type="number" id="guests" value="1" min="1" onchange="calculatePrice()" />
+        <input type="number" id="guests" value="1" min="1" max="6" onchange="calculatePrice()" />
       </div>
       <div class="form-group">
         <label style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;">
@@ -97,16 +118,23 @@
       </div>
       <div class="form-group">
         <label for="start">Startdatum</label>
-        <input type="text" id="start" readonly />
+        <input type="date" id="start" readonly
+          onfocus="this.removeAttribute('readonly');"
+          onblur="this.setAttribute('readonly','');"
+          onchange="onDateInputChange()" />
       </div>
       <div class="form-group">
         <label for="end">Enddatum</label>
-        <input type="text" id="end" readonly />
+        <input type="date" id="end" readonly
+          onfocus="this.removeAttribute('readonly');"
+          onblur="this.setAttribute('readonly','');"
+          onchange="onDateInputChange()" />
       </div>
       <p id="bettwaescheSum"></p>
       <p>Endreinigung: 100€</p>
+      <p id="rabattInfo" style="color:#28a745; font-weight:bold; display:none;"></p>
       <p id="totalPrice"></p>
-      <button onclick="submitBooking()">Buchung abschicken</button>
+      <button onclick="submitBooking()">Buchung anfragen</button>
     </div>
   </div>
 
@@ -119,12 +147,32 @@
     const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
       selectable: true,
       initialView: 'multiMonthYear',
+      multiMonthMaxColumns: 1, // force a single column
       locale: 'de',
-      views: {
-        multiMonthYear: {
-          type: 'multiMonth',
-          monthCount: 2 // Nur 2 Monate anzeigen
+      firstDay: 1, // Montag als erster Tag
+      headerToolbar: {
+        left: 'prev,next heute',
+        center: 'title',
+        right: ''
+      },
+      customButtons: {
+        heute: {
+          text: 'Heute',
+          click: function() {
+            calendar.today();
+            setTimeout(scrollToCurrentMonth, 50);
+          }
         }
+      },
+      views: {
+        multiMonth: {
+          type: 'multiMonthYear',
+          multiMonthMaxColumns: 1, // force a single column
+          direction: 'vertical'    // Vertikales Scrollen
+        }
+      },
+      eventContent: function(arg) {
+        return { html: arg.event.title };
       },
       events: async function(fetchInfo, successCallback, failureCallback) {
         try {
@@ -162,17 +210,14 @@
             }
             return true;
           }).map(price => {
-
-            let title = "Standard";
-            // Sonst Category1 (z.B. Titel)
+            let preisText = "";
+            let kategorieText = "";
             if (price.extendedProps && price.extendedProps.price && price.extendedProps.priceCategory) {
-              title = "Standard: " + price.extendedProps.price;
-              if (price.extendedProps.priceCategory === 'Category2') {
-                title = "Mit Haustier: " + price.extendedProps.price;
-              }
+              preisText = price.extendedProps.price;
+              kategorieText = price.extendedProps.priceCategory === 'Category2' ? "Mit Haustier" : "Standard";
             }
             return {
-              title: title,
+              title: `${preisText} / Tag`,
               start: price.start,
               end: price.end,
               backgroundColor: price.backgroundColor,
@@ -229,7 +274,7 @@
             return;
           } 
           document.getElementById('start').value = startDate;
-          document.getElementById('end').value = endDate;
+          document.getElementById('end').value = new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10);
           document.getElementById('formOverlay').style.display = 'flex';
           calculatePrice();
         });
@@ -249,6 +294,7 @@
       var category = document.getElementById('category').value;
       if(category === 'Standard') category = 'Category1';
       else if(category === 'Mit Haustier') category = 'Category2';
+      category = "Category1"; // Immer Standard als Kategorie
 
       const guests = parseInt(document.getElementById('guests').value);
       const haustiere= document.getElementById('optionHaustiere').checked;
@@ -258,24 +304,50 @@
         const priceRes = await axios.get('/api/prices');
         const days = getDateRange(new Date(startDate), new Date(endDate));
         let sum = 0;
+        let minNights = 2;
         for (const day of days) {
           const entry = priceRes.data.find(p => p.start === day && p.extendedProps.priceCategory && p.extendedProps.priceCategory.startsWith(category));
           if (entry) {
             let priceStr = entry.extendedProps.price.replace('€', '').trim();
             let base = parseFloat(priceStr);
-            if (haustiere) base *= 1.11;
+            if(haustiere) base *= 1.05; // 5% Aufschlag für Haustier
+            if(minNights < entry.extendedProps.minNights) {
+              minNights = entry.extendedProps.minNights;
+            }
             sum += base;
           }
+        }
+        if (days.length < minNights) {
+          alert(`Die Mindestanzahl für diesen Zeitraum beträgt ${minNights} Nächte. Bitte wähle einen längeren Zeitraum aus.`);
+          closeForm(); // Dialog schließen
+          return;
         }
         sum += FIXKOSTEN.reinigung;
         const bettwaescheSum = FIXKOSTEN.bettwaesche * guests;
         sum += bettwaescheSum;
         sum += FIXKOSTEN.proPerson * guests;
 
+        // Rabatt: 10% ab 7 Nächten
+        let rabatt = 0;
+        if (days.length > 6) {
+          rabatt = sum * 0.1;
+          sum = sum * 0.9;
+        }
+
         // Bettwäsche-Summe anzeigen
         const bettwaescheSumElem = document.getElementById('bettwaescheSum');
         if (bettwaescheSumElem) {
           bettwaescheSumElem.innerText = `Bettwäsche + Kurtaxe (p. P. 15€) - Summe: ${bettwaescheSum.toFixed(2)} €`;
+        }
+
+        // Rabatt anzeigen
+        const rabattElem = document.getElementById('rabattInfo');
+        if (rabatt > 0) {
+          rabattElem.style.display = 'block';
+          rabattElem.innerHTML = `Rabatt für Langzeitbuchung (10%): -${rabatt.toFixed(2)} €`;
+        } else {
+          rabattElem.style.display = 'none';
+          rabattElem.innerHTML = '';
         }
 
         document.getElementById('totalPrice').innerHTML = `<b>Gesamtpreis: ${sum.toFixed(2)} €</b>`;
@@ -284,35 +356,46 @@
       }
     }
 
-    async function submitBooking() {
-      const email = document.getElementById('email').value.trim();
+    function validateEmail() {
+      const emailInput = document.getElementById('email');
+      const errorSpan = document.getElementById('emailError');
+      const value = emailInput.value.trim();
+      // Mindestens 2 Zeichen nach @, vor und nach dem Punkt
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!value) {
+        errorSpan.style.display = 'block';
+        errorSpan.innerText = 'Bitte gib eine E-Mail-Adresse an.';
+        emailInput.style.borderColor = '#c00';
+        return false;
+      }
+      if (!emailPattern.test(value)) {
+        errorSpan.style.display = 'block';
+        errorSpan.innerText = 'Bitte gib eine gültige E-Mail-Adresse ein';
+        emailInput.style.borderColor = '#c00';
+        return false;
+      }
+      errorSpan.style.display = 'none';
+      emailInput.style.borderColor = '';
+      return true;
+    }
 
-      // E-Mail-Validierung: nicht leer, enthält @ und Punkt
-      if (!email) {
-        alert('Bitte gib eine E-Mail-Adresse an.');
-        return;
-      }
-      if (!email.includes('@') || !email.includes('.')) {
-        alert('Bitte gib eine gültige E-Mail-Adresse ein.');
-        return;
-      }
+    async function submitBooking() {
+      if (!validateEmail()) return;
 
       const data = {
-        title: "Gebucht",
+        title: "Belegt",
         name: document.getElementById('name').value,
-        email: email,
+        email: document.getElementById('email').value,
         category: document.getElementById('category').value,
         guests: parseInt(document.getElementById('guests').value),
-        haustiere: document.getElementById('optionHaustiere').checked,
+        has_pet: document.getElementById('optionHaustiere').checked,
         start_date: startDate,
         end_date: endDate
       };
 
       try {
         const payload = { ...data };
-        delete payload.guests;
         delete payload.bettwaesche;
-        delete payload.Category2e;
 
         const res = await axios.post('/api/events', payload);
         document.getElementById('totalPrice').innerText = `Gesamtpreis: ${res.data.total_price.toFixed(2)} €`;
@@ -327,6 +410,7 @@
     function getDateRange(start, end) {
       const dates = [];
       let current = new Date(start);
+      current.setDate(current.getDate() + 1); // Startdatum um einen Tag erhöhen
       while (current < end) {
         dates.push(current.toISOString().slice(0, 10));
         current.setDate(current.getDate() + 1);
@@ -337,6 +421,40 @@
     function closeForm() {
       document.getElementById('formOverlay').style.display = 'none';
     }
+
+    function onDateInputChange() {
+      startDate = document.getElementById('start').value;
+      endDate = document.getElementById('end').value;
+      calculatePrice();
+    }
+
+    // Scroll-Funktion für aktuellen Monat
+    function scrollToCurrentMonth() {
+      const today = new Date();
+      const monthName = today.toLocaleString('de-DE', { month: 'long' }).toLowerCase();
+      const year = today.getFullYear();
+
+      const monthEls = document.querySelectorAll('.fc-multimonth-month');
+      for (const el of monthEls) {
+        let header = el.querySelector('.fc-multimonth-title').textContent.trim().toLowerCase();
+        if (!header && el.firstChild) header = el.firstChild;
+
+        if (header === monthName) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          break;
+        }
+      }
+    }
+
+    // Heute-Button nach Rendern abfangen und Scroll auslösen
+    setTimeout(() => {
+      const heuteBtn = document.querySelector('.fc-heute-button');
+      if (heuteBtn) {
+        heuteBtn.addEventListener('click', () => {
+          setTimeout(scrollToCurrentMonth, 50);
+        });
+      }
+    }, 100);
   </script>
 </body>
 </html>

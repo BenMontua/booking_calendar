@@ -11,8 +11,9 @@
     }
 
     #calendar {
-      max-width: 1100px;
       margin: 0 auto;
+      width: 90vw;
+      max-width: 90vw;
     }
 
     #priceModal {
@@ -45,6 +46,9 @@
 
     .fc-event-title {
       font-size: 0.85em;
+      text-align: center;
+      width: 100%;
+      display: block;
     }
 
     /* Buchungs-Bearbeitungsdialog */
@@ -69,6 +73,10 @@
 </head>
 <body>
   <h1>Preisverwaltung (Admin)</h1>
+  <label style="display:block; margin-bottom:1em;">
+    <input type="checkbox" id="toggleCombinedCalendar">
+    "Kombinierten Kalender" anzeigen
+  </label>
   <div id="calendar"></div>
 
   <!-- Modal für Preis-Eingabe -->
@@ -85,6 +93,8 @@
       </select>
       <label>Preis (€)</label>
       <input type="number" name="price" step="0.01" required />
+      <label>Mindestnächte</label>
+      <input type="number" name="min_nights" min="2" value="3" required />
       <input type="hidden" name="start_date" />
       <input type="hidden" name="end_date" />
       <button type="submit">Speichern</button>
@@ -139,13 +149,43 @@
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       let lastSelectEvent = null;
+      let scrollToTodayPending = false;
 
+      // Checkbox-Status merken
+      let showCombinedCalendar = false;
+      const checkbox = document.getElementById('toggleCombinedCalendar');
+      checkbox.addEventListener('change', function() {
+        showCombinedCalendar = this.checked;
+        calendar.refetchEvents();
+      });
+
+      // FullCalendar-Setup
       const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
-        initialView: 'dayGridMonth',
+        initialView: 'multiMonthYear',
+        multiMonthMaxColumns: 2,
+        //multiMonthMaxRows: 1, // Zeigt ca. 1,5 Monate (2 Reihen, aber nur 1 Spalte)
+        //multiMonthMinWidth: 0, // Optional: verhindert horizontales Scrollen
         selectable: true,
-        selectLongPressDelay: 1, // sofortiges Select
         height: 'auto',
         eventDisplay: 'block',
+        locale: 'de',
+        now: new Date(),
+        nowIndicator: true,
+        firstDay: 1, // Montag als erster Tag
+        headerToolbar: {
+          left: 'prev,next heute',
+          center: 'title',
+          right: ''
+        },
+        customButtons: {
+          heute: {
+            text: 'Heute',
+            click: function() {
+              calendar.today();
+              setTimeout(scrollToCurrentMonth, 50);
+            }
+          }
+        },
         events: async function(fetchInfo, successCallback, failureCallback) {
           try {
             // Preise laden
@@ -156,27 +196,73 @@
             const bookingsRes = await fetch('/api/events');
             const bookings = await bookingsRes.json();
 
-            // Preise und Buchungen zusammenführen
-            successCallback([...prices, ...bookings]);
+            // iCal-Events laden
+            const icalRes = await fetch('/api/ical-events');
+            let icalEvents = await icalRes.json();
+
+            // Filter "Alle Kalender" Events je nach Checkbox
+            if (!showCombinedCalendar) {
+              icalEvents = icalEvents.filter(ev => ev.calendarName !== "Alle Kalender");
+            }
+
+            // Alle belegten Tage sammeln
+            const bookedDays = new Set();
+            bookings.forEach(ev => {
+              const start = new Date(ev.start);
+              const end = new Date(ev.end || ev.start);
+              for (
+                let d = new Date(start);
+                d < end;
+                d.setDate(d.getDate() + 1)
+              ) {
+                bookedDays.add(d.toISOString().slice(0, 10));
+              }
+            });
+
+            // Preise filtern und Titel bauen (deutsche Titel)
+            const priceEvents = prices.filter(price => {
+              const start = new Date(price.start);
+              const end = new Date(price.end || price.start);
+              for (
+                let d = new Date(start);
+                d <= end;
+                d.setDate(d.getDate() + 1)
+              ) {
+                if (bookedDays.has(d.toISOString().slice(0, 10))) return false;
+              }
+              return true;
+            }).map(price => {
+              let preisText = "";
+              let kategorieText = "";
+              if (price.extendedProps && price.extendedProps.price && price.extendedProps.priceCategory) {
+                preisText = price.extendedProps.price;
+                kategorieText = price.extendedProps.priceCategory === 'Category2' ? "Mit Haustier" : "Standard";
+              } else if (price.price && price.category) {
+                preisText = price.price;
+                kategorieText = price.category === 'Category2' ? "Mit Haustier" : "Standard";
+              }
+              return {
+                title: `${preisText}`,
+                start: price.start,
+                end: price.end,
+                backgroundColor: price.backgroundColor || "#ffeeba",
+                borderColor: price.backgroundColor || "#ffeeba"
+              };
+            });
+
+            // Alle Events zusammen anzeigen
+            successCallback([...priceEvents, ...bookings, ...icalEvents]);
           } catch (err) {
             failureCallback(err);
           }
         },
         eventContent: function(arg) {
-          // Wenn es ein Event mit extendedProps.name ist (also eine Buchung), zeige den Namen an
           if (arg.event.extendedProps && arg.event.extendedProps.name) {
-            return { html: `${arg.event.extendedProps.name}` };
+            const personen = arg.event.extendedProps.guests ? `${arg.event.extendedProps.guests} Personen` : "";
+            const haustier = arg.event.extendedProps.has_pet ? " mit Haustier 🐾" : "";
+            return { html: `${arg.event.extendedProps.name} - ${personen}${haustier}` };
           }
-
-          let title = "Standard";
-          // Sonst Category1 (z.B. Titel)
-          if (arg.event.extendedProps && arg.event.extendedProps.price && arg.event.extendedProps.priceCategory) {
-            title = "Standard: " + arg.event.extendedProps.price;
-            if (arg.event.extendedProps.priceCategory === 'Category2') {
-              title = "Mit Haustier: " + arg.event.extendedProps.price;
-            }
-          }
-          return { html: title };
+          return { html: arg.event.title };
         },
         select: function (info) {
           // Prüfe, ob STRG gedrückt ist
@@ -211,22 +297,79 @@
               }
             }
           }
+        },
+        // --- NEU: Automatisches Scrollen zum aktuellen Monat ---
+        datesSet: function(info) {
+          if (calendar.view.type === 'multiMonthYear') {
+            setTimeout(() => {
+              scrollToCurrentMonth();
+              scrollToTodayPending = false;
+            }, 50);
+          }
         }
       });
 
       calendar.render();
+
+      // Scroll-Funktion für aktuellen Monat
+      function scrollToCurrentMonth() {
+        const today = new Date();
+        const monthName = today.toLocaleString('de-DE', { month: 'long' }).toLowerCase();
+        const year = today.getFullYear();
+
+        const monthEls = document.querySelectorAll('.fc-multimonth-month');
+        for (const el of monthEls) {
+          let header = el.querySelector('.fc-multimonth-title').textContent.trim().toLowerCase();
+          if (!header && el.firstChild) header = el.firstChild;
+
+          if (header === monthName) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            break;
+          }
+        }
+      }
+
+      // Heute-Button nach Rendern abfangen und Scroll auslösen
+      setTimeout(() => {
+        const heuteBtn = document.querySelector('.fc-heute-button');
+        if (heuteBtn) {
+          heuteBtn.addEventListener('click', () => {
+            setTimeout(scrollToCurrentMonth, 50);
+          });
+        }
+      }, 100);
 
       // Modal-Logik
       const overlay = document.getElementById('overlay');
       const modal = document.getElementById('priceModal');
       const form = document.getElementById('modalForm');
 
-      function showModal(start, end) {
+      async function showModal(start, end) {
         form.start_date.value = start;
         form.end_date.value = new Date(new Date(end).getTime() - 86400000).toISOString().slice(0, 10);
         document.getElementById('modalDates').value = `${start} bis ${form.end_date.value}`;
+
+        // Werte aus DB für den ersten Tag vorbelegen
+        try {
+          const pricesRes = await fetch('/api/prices');
+          const prices = await pricesRes.json();
+          const firstDayPrice = prices.find(p => p.start === start && p.extendedProps.priceCategory === form.category.value);
+          if (firstDayPrice) {
+            const priceNum = parseFloat(firstDayPrice.extendedProps.price.toString().replace(/[^0-9,.]/g, '').replace(',', '.'));
+            form.price.value = isNaN(priceNum) ? '' : priceNum; 
+            form.min_nights.value = firstDayPrice.extendedProps.minNights;
+          } else {
+            form.price.value = '';
+            form.min_nights.value = 3; // Default
+          }
+        } catch (e) {
+          form.price.value = '';
+          form.min_nights.value = 3;
+        }
+
         overlay.style.display = 'block';
         modal.style.display = 'block';
+        form.price.focus();
       }
 
       function hideModal() {
@@ -241,7 +384,8 @@
           start_date: form.start_date.value,
           end_date: form.end_date.value,
           category: form.category.value,
-          price: parseFloat(form.price.value)
+          price: parseFloat(form.price.value),
+          min_nights: parseInt(form.min_nights.value) // NEU
         };
 
         const response = await fetch('/api/prices', {
@@ -318,7 +462,9 @@
         currentBookingId = event.id;
         bookingForm.title.value = event.title || '';
         bookingForm.start_date.value = event.startStr ? event.startStr.slice(0,10) : '';
-        bookingForm.end_date.value = event.endStr ? event.endStr.slice(0,10) : '';
+        bookingForm.end_date.value = event.endStr
+          ? new Date(new Date(event.endStr).getTime() - 86400000).toISOString().slice(0,10)
+          : '';
         bookingForm.name.value = event.extendedProps?.name || '';
         bookingForm.email.value = event.extendedProps?.email || '';
         // Kategorie vorbelegen: prüfe mehrere Quellen und gleiche auf die neuen Werte ab

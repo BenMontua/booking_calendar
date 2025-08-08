@@ -5,10 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch booking",
-            "type": "pwa-chrome",
+            "name": "Launch frontend",
+            "type": "chrome",
             "request": "launch",
-            "url": "http://localhost:3000/",
+            "url": "http://localhost:3000/admin",
             "webRoot": "${workspaceFolder}"
         },
         {
@@ -25,7 +25,7 @@
     {
         "name": "Start frontend and backend",
         "configurations": [
-        "Launch booking",
+        "Launch frontend",
         "Launch backend"
         ]
     }
