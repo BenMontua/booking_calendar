@@ -74,11 +74,11 @@ CREATE TABLE IF NOT EXISTS ical_events (
 `);
 
 
-// Neue Spalten zu bookings hinzufügen (falls noch nicht vorhanden)
-//try { db.prepare('ALTER TABLE bookings DELETE COLUMN persons INTEGER').run(); } catch(e){}
-//try { db.prepare('ALTER TABLE bookings ADD COLUMN guests INTEGER').run(); } catch(e){}
 // Neue Spalte min_nights zu prices hinzufügen (falls noch nicht vorhanden)
 try { db.prepare('ALTER TABLE prices ADD COLUMN min_nights INTEGER DEFAULT 1').run(); } catch(e){}
+
+// Einmalig: Alle Buchungen löschen
+//db.exec('DELETE FROM bookings');
 
 
 // SMTP Transporter für Nodemailer (bitte SMTP Daten anpassen)
@@ -270,7 +270,6 @@ app.delete('/api/prices', (req, res) => {
   }
 });
 
-
 // iCal Export Route (alle Buchungen)
 app.get('/api/ical', (req, res) => {
   const bookings = db.prepare('SELECT * FROM bookings').all();
@@ -312,9 +311,9 @@ app.get('/calendar', (req, res) => {
 // Buchung aktualisieren
 app.put('/api/events/:id', (req, res) => {
   try {
-    const { title, start_date, end_date, name, email, category } = req.body;
-    const stmt = db.prepare('UPDATE bookings SET title = ?, start_date = ?, end_date = ?, name = ?, email = ?, category = ? WHERE id = ?');
-    const result = stmt.run(title, start_date, end_date, name, email, category, req.params.id);
+    const { title, start_date, end_date, name, email, category, guests, has_pet } = req.body;
+    const stmt = db.prepare('UPDATE bookings SET title = ?, start_date = ?, end_date = ?, name = ?, email = ?, category = ?, guests = ?, has_pet = ? WHERE id = ?');
+    const result = stmt.run(title, start_date, end_date, name, email, category, guests, has_pet, req.params.id);
     if (result.changes > 0) {
       res.json({ success: true });
     } else {
@@ -363,17 +362,41 @@ async function syncIcalCalendars() {
       const vevents = comp.getAllSubcomponents('vevent');
       vevents.forEach(ev => {
         const event = new ICAL.Event(ev);
-        // Enddatum um einen Tag verlängern
-        let endDate = event.endDate ? new Date(event.endDate.toString()) : new Date(event.startDate.toString());
+        let endDateEvent = event.endDate ? new Date(event.endDate.toString()) : new Date(event.startDate.toString());
+        // NEU: Auch als Buchung in die DB eintragen, aber nur wenn noch nicht vorhanden
+        const startDate = event.startDate.toString().slice(0, 10);
+        const endDate = endDateEvent.toISOString().slice(0, 10);
+
         //endDate.setDate(endDate.getDate() + 1);
         allEvents.push({
           title: `${cal.name}: ${event.summary}`,
-          start: event.startDate.toString(),
-          end: endDate.toISOString(), // Enddatum +1 Tag
+          start: startDate,
+          end: endDate,
           calendarName: cal.name,
           backgroundColor: cal.color,
           borderColor: cal.border
         });
+
+        const existsBooking = db.prepare(
+          'SELECT id FROM bookings WHERE start_date = ? AND end_date = ?'
+        ).get(startDate, endDate);
+
+        if (!existsBooking) {
+          const insertBooking = db.prepare(`INSERT INTO bookings 
+            (title, start_date, end_date, name, email, category, total_price, guests, has_pet) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+          insertBooking.run(
+            "Belegt",
+            startDate,
+            endDate,
+            cal.name,
+            "",
+            "Category1",
+            0,
+            1,
+            0
+          );
+        }
       });
     } catch (err) {
       console.warn(`Fehler beim Laden von ${cal.name}:`, err);

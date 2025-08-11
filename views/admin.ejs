@@ -62,6 +62,8 @@
       border: 1px solid #ccc;
       padding: 1rem;
       z-index: 1001;
+      width: 500px; /* Doppelte Breite (Standard war ca. 350px) */
+      max-width: 90vw;
     }
 
     #bookingModal input, #bookingModal select {
@@ -133,11 +135,20 @@
       <input type="text" name="name" required>
       <label>E-Mail</label>
       <input type="email" name="email" required>
-      <label>Kategorie</label>
+      <label>Anzahl Personen</label>
+      <input type="number" name="guests" min="1" max="6" required>
+<label style="display: flex; align-items: center; gap: 8px; white-space: nowrap;">
+  <span>Haustiere mitbringen</span>
+  <input type="checkbox" name="has_pet" />
+</label>
+      <!-- Trenner/Leerzeile hinzufügen -->
+      <hr style="margin:1em 0; border:none; border-top:1px solid #ccc;">
+      <!-- Kategorie entfernt -->
+      <!-- <label>Kategorie</label>
       <select name="category" required>
         <option value="Category1">Standard</option>
         <option value="Category2">Mit Haustier</option>
-      </select>
+      </select> -->
       <!-- Weitere Felder nach Bedarf -->
       <button type="submit">Speichern</button>
       <button type="button" id="bookingDeleteBtn" style="background:#c00; color:#fff;">Löschen</button>
@@ -194,11 +205,23 @@
 
             // Buchungen laden
             const bookingsRes = await fetch('/api/events');
-            const bookings = await bookingsRes.json();
+            let bookings = await bookingsRes.json();
+
+            // Enddatum für die Darstellung im Kalender um 1 Tag erhöhen
+            bookings = bookings.map(ev => ({
+              ...ev,
+              end: ev.end ? new Date(new Date(ev.end).getTime() + 86400000).toISOString().slice(0, 10) : ev.end
+            }));
 
             // iCal-Events laden
             const icalRes = await fetch('/api/ical-events');
             let icalEvents = await icalRes.json();
+
+            // Enddatum für die Darstellung im Kalender um 1 Tag erhöhen
+            icalEvents = icalEvents.map(ev => ({
+              ...ev,
+              end: ev.end ? new Date(new Date(ev.end).getTime() + 86400000).toISOString().slice(0, 10) : ev.end
+            }));
 
             // Filter "Alle Kalender" Events je nach Checkbox
             if (!showCombinedCalendar) {
@@ -462,16 +485,22 @@
         currentBookingId = event.id;
         bookingForm.title.value = event.title || '';
         bookingForm.start_date.value = event.startStr ? event.startStr.slice(0,10) : '';
-        bookingForm.end_date.value = event.endStr
-          ? new Date(new Date(event.endStr).getTime() - 86400000).toISOString().slice(0,10)
-          : '';
+        if (event.endStr) {
+          const endDate = new Date(event.endStr);
+          endDate.setDate(endDate.getDate() - 1);
+          bookingForm.end_date.value = endDate.toISOString().slice(0,10);
+        } else {
+          bookingForm.end_date.value = '';
+        }
         bookingForm.name.value = event.extendedProps?.name || '';
         bookingForm.email.value = event.extendedProps?.email || '';
+        bookingForm.guests.value = event.extendedProps?.guests || 1;
+        bookingForm.has_pet.checked = !!event.extendedProps?.has_pet;
         // Kategorie vorbelegen: prüfe mehrere Quellen und gleiche auf die neuen Werte ab
         let cat = event.extendedProps?.category || event.category || '';
         if (cat === 'Category1') cat = 'Standard';
         else if (cat === 'Category2') cat = 'Mit Haustier';
-        bookingForm.category.value = cat;
+        //bookingForm.category.value = cat;
         bookingModal.style.display = 'block';
       }
 
@@ -484,13 +513,18 @@
       bookingForm.onsubmit = async function(e) {
         e.preventDefault();
         if (!currentBookingId) return;
+        // Enddatum + 1 Tag setzen
+        const endDate = new Date(bookingForm.end_date.value);
+        endDate.setDate(endDate.getDate());// + 1);
         const body = {
           title: bookingForm.title.value,
           start_date: bookingForm.start_date.value,
-          end_date: bookingForm.end_date.value,
+          end_date: endDate.toISOString().slice(0,10),
           name: bookingForm.name.value,
           email: bookingForm.email.value,
-          category: bookingForm.category.value
+          guests: parseInt(bookingForm.guests.value),
+          has_pet: bookingForm.has_pet.checked ? 1 : 0,
+          category: 'Standard'
         };
         const response = await fetch(`/api/events/${currentBookingId}`, {
           method: 'PUT',
@@ -507,7 +541,7 @@
 
       bookingDeleteBtn.onclick = async function() {
         if (!currentBookingId) return;
-        if (!confirm('Buchung wirklich löschen?')) return;
+        //if (!confirm('Buchung wirklich löschen?')) return;
         const response = await fetch(`/api/events/${currentBookingId}`, { method: 'DELETE' });
         if (response.ok) {
           calendar.refetchEvents();

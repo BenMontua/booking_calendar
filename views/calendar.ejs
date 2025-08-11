@@ -182,6 +182,12 @@
           ]);
           const events = eventsRes.data;
 
+          // Enddatum für die Darstellung im Kalender um 1 Tag erhöhen
+          const eventsWithAdjustedEnd = events.map(ev => ({
+            ...ev,
+            end: ev.end ? new Date(new Date(ev.end).getTime() + 86400000).toISOString().slice(0, 10) : ev.end
+          }));
+
           // Alle belegten Tage sammeln (YYYY-MM-DD)
           const bookedDays = new Set();
           events.forEach(ev => {
@@ -225,7 +231,7 @@
             };
           });
 
-          successCallback([...events, ...priceEvents]);
+          successCallback([...eventsWithAdjustedEnd, ...priceEvents]);
         } catch (err) {
           failureCallback(err);
         }
@@ -234,7 +240,6 @@
         startDate = info.startStr;
         endDate = info.endStr;
 
-        // Prüfe, ob mindestens 2 Tage ausgewählt wurden
         const start = new Date(startDate);
         const end = new Date(endDate);
         const diffDays = (end - start) / (1000 * 60 * 60 * 24);
@@ -247,14 +252,13 @@
         // Prüfe, ob die Auswahl mit bestehenden Events kollidiert
         axios.get('/api/events').then(res => {
           const events = res.data;
-          // Alle belegten Tage sammeln
           const bookedDays = new Set();
           events.forEach(ev => {
             const start = new Date(ev.start);
             const end = new Date(ev.end || ev.start);
             for (
               let d = new Date(start);
-              d < end; // nur bis einen Tag vor end
+              d < end;
               d.setDate(d.getDate() + 1)
             ) {
               bookedDays.add(d.toISOString().slice(0, 10));
@@ -272,11 +276,33 @@
           if (overlapCount > 1) {
             alert('Die Auswahl überschneidet sich mit bestehenden Buchungen an mehr als einem Tag.');
             return;
-          } 
-          document.getElementById('start').value = startDate;
-          document.getElementById('end').value = new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10);
-          document.getElementById('formOverlay').style.display = 'flex';
-          calculatePrice();
+          }
+
+          // Prüfe, ob für alle Tage ein Preis gesetzt ist
+          axios.get('/api/prices').then(priceRes => {
+            const prices = priceRes.data;
+            let d = new Date(startDate);
+            const endD = new Date(endDate);
+            let allDaysHavePrice = true;
+            while (d < endD) {
+              const dateStr = d.toISOString().slice(0, 10);
+              const priceForDay = prices.find(p => p.start === dateStr && p.extendedProps.priceCategory === 'Category1');
+              if (!priceForDay) {
+                allDaysHavePrice = false;
+                break;
+              }
+              d.setDate(d.getDate() + 1);
+            }
+            if (!allDaysHavePrice) {
+              alert('Es ist nicht für alle Tage ein Preis vorhanden, Du kannst nur Zeiträume buchen, für die ein Preis vorliegt.');
+              return;
+            }
+            // Dialog öffnen
+            document.getElementById('start').value = startDate;
+            document.getElementById('end').value = new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10);
+            document.getElementById('formOverlay').style.display = 'flex';
+            calculatePrice();
+          });
         });
       }
     });
@@ -390,7 +416,7 @@
         guests: parseInt(document.getElementById('guests').value),
         has_pet: document.getElementById('optionHaustiere').checked,
         start_date: startDate,
-        end_date: endDate
+        end_date: new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10)
       };
 
       try {
