@@ -1,8 +1,19 @@
 body {
     font-family: sans-serif;
-    background: #f9f9f9;
     margin: 0;
     padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    background: #f9f9f9;
+}
+
+#calendar {
+    width: 90vw;
+    max-width: 90vw;
+    max-height: 90vh;
+    margin: 40px 0;
 }
 
 h2 {
@@ -39,3 +50,202 @@ button:hover {
     background: #218838;
 }
 
+#admin-calendar {
+    margin: 0 auto;
+    width: 90vw;
+    max-width: 90vw;
+}
+
+#priceModal {
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    border: 1px solid #ccc;
+    padding: 1rem;
+    display: none;
+    z-index: 1000;
+}
+
+#priceModal input,
+#priceModal select {
+    display: block;
+    margin: 0.5rem 0;
+    width: 100%;
+}
+
+#overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: 900;
+}
+
+.fc-event-title {
+    font-size: 0.85em;
+    text-align: center;
+    width: 100%;
+    display: block;
+}
+
+/* Buchungs-Bearbeitungsdialog */
+#bookingModal {
+    display: none;
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    border: 1px solid #ccc;
+    padding: 1rem;
+    z-index: 1001;
+    width: 500px;
+    /* Doppelte Breite (Standard war ca. 350px) */
+    max-width: 90vw;
+}
+
+#bookingModal input,
+#bookingModal select {
+    display: block;
+    margin: 0.5rem 0;
+    width: 100%;
+}
+
+.fc-multimonth {
+    width: 100% !important;
+}
+
+.form-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.form-container {
+    background: white;
+    padding: 20px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 600px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+    position: relative;
+}
+
+.form-group {
+    margin-bottom: 10px;
+}
+
+label {
+    display: block;
+    margin-bottom: 4px;
+}
+
+input,
+select {
+    width: 100%;
+    padding: 6px;
+}
+
+button {
+    padding: 10px 15px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.close-button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #a28c89;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    transition: background 0.2s;
+    padding: 0;
+}
+
+.close-button:hover {
+    background: #c0392b;
+}
+
+.fc-event-title,
+.fc-event .fc-event-title {
+    text-align: center;
+    width: 100%;
+    display: block;
+}
+
+.fc-bg-event,
+.fc-bg-event .fc-event-title,
+.fc-event.price-event,
+.fc-event.price-event .fc-event-title {
+  color: #000 !important;
+  --fc-bg-event-opacity: 0.7;
+}
+
+.full-day {
+
+  border-radius: 4px;
+  padding: 2px 4px;
+    min-height: 18px;
+  line-height: 18px;
+  display: flex;
+  align-items: center;
+}
+
+.half-day-start {
+  background: repeating-linear-gradient(
+    135deg,
+    #e4e4e4,
+    #e4e4e4 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  border-radius: 4px;
+  padding: 2px 4px;
+    min-height: 18px;
+  line-height: 18px;
+  display: flex;
+  align-items: center;
+}
+
+.half-day-end {
+  background: repeating-linear-gradient(
+    45deg,
+    #e4e4e4,
+    #e4e4e4 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  border-radius: 4px;
+  padding: 2px 4px;
+    min-height: 18px;
+  line-height: 18px;
+  display: flex;
+  align-items: center;
+  
+}

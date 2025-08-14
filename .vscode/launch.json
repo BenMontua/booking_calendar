@@ -8,7 +8,7 @@
             "name": "Launch frontend",
             "type": "chrome",
             "request": "launch",
-            "url": "http://localhost:3000/admin",
+            "url": "http://localhost:3000/calendar",
             "webRoot": "${workspaceFolder}"
         },
         {

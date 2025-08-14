@@ -3,78 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <title>Buchungskalender</title>
+  <link rel="stylesheet" href="/main.css">
   <style>
-    body { 
-      font-family: sans-serif; 
-      margin: 0; 
-      padding: 0; 
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      min-height: 100vh;
-      background: #f9f9f9;
-    }
-    #calendar {
-      width: 90vw;
-      max-width: 90vw;
-      max-height: 90vh;
-      margin: 40px 0;
-    }
-    .fc-multimonth {
-      width: 100% !important;
-    }
-    .form-overlay {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: rgba(0, 0, 0, 0.5);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 1000;
-    }
-    .form-container {
-      background: white;
-      padding: 20px;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      width: 90%;
-      max-width: 600px;
-      box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
-      position: relative;
-    }
-    .form-group { margin-bottom: 10px; }
-    label { display: block; margin-bottom: 4px; }
-    input, select { width: 100%; padding: 6px; }
-    button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
-    .close-button {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: #a28c89;
-      color: #fff;
-      border: none;
-      border-radius: 50%;
-      width: 32px;
-      height: 32px;
-      font-size: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-      transition: background 0.2s;
-      padding: 0;
-    }
-    .close-button:hover {
-      background: #c0392b;
-    }
-    .fc-event-title,
-    .fc-event .fc-event-title {
-      text-align: center;
-      width: 100%;
-      display: block;
-    }
+
   </style>
 </head>
 <body>
@@ -172,6 +103,16 @@
         }
       },
       eventContent: function(arg) {
+        const classNames = arg.event.classNames || [];
+        if (classNames.includes('half-day-start')) {
+          return { html: `<span class="half-day-start">${arg.event.title}</span>` };
+        }
+        else if (classNames.includes('half-day-end')) {
+          return { html: `<span class="half-day-end">${arg.event.title}</span>` };
+        }
+        else if (classNames.includes('full-day')) {
+          return { html: `<span class="full-day">${arg.event.title}</span>` };
+        }
         return { html: arg.event.title };
       },
       events: async function(fetchInfo, successCallback, failureCallback) {
@@ -183,18 +124,50 @@
           const events = eventsRes.data;
 
           // Enddatum für die Darstellung im Kalender um 1 Tag erhöhen
-          const eventsWithAdjustedEnd = events.map(ev => ({
-            ...ev,
-            end: ev.end ? new Date(new Date(ev.end).getTime() + 86400000).toISOString().slice(0, 10) : ev.end
-          }));
+          const eventsWithAdjustedEnd = events.map(ev => {
+            // Setze allDay für den ersten und letzten Tag auf false
+            const startDate = new Date(ev.start); 
+            startDate.setDate(startDate.getDate() + 1);
+            const endDate = ev.end ? ev.end : null;
+            return {
+              ...ev,
+              start: startDate,
+              end: endDate,
+              allDay: true,
+              classNames: ['full-day']
+            };
+          });
+
+          const eventsWithHalfDays = [];
+          events.forEach(ev => {
+            // Erster Tag als Einzel-Event mit allDay: false
+            eventsWithHalfDays.push({
+              ...ev,
+              title: 'Anreise',
+              start: ev.start,
+              end: ev.start,
+              allDay: true, // Ganztags-Event!
+              classNames: ['half-day-start']
+            });
+            // Letzter Tag als Einzel-Event mit allDay: false
+            const endDate = ev.end ? ev.end : null;
+            eventsWithHalfDays.push({
+              ...ev,
+              title: 'Abreise',
+              start: endDate,
+              end: endDate,
+              allDay: true, // Ganztags-Event!
+              classNames: ['half-day-end']
+            });
+          });
 
           // Alle belegten Tage sammeln (YYYY-MM-DD)
           const bookedDays = new Set();
           events.forEach(ev => {
-            const start = new Date(ev.start);
-            const end = new Date(ev.end || ev.start);
+          const startPlusOne = new Date(ev.start); startPlusOne.setDate(startPlusOne.getDate() + 1);
+          const end = new Date(ev.end || ev.start);
             for (
-              let d = new Date(start);
+              let d = new Date(startPlusOne);
               d < end; // nur bis einen Tag vor end
               d.setDate(d.getDate() + 1)
             ) {
@@ -210,8 +183,8 @@
             for (
               let d = new Date(start);
               d <= end;
-              d.setDate(d.getDate() + 1)
-            ) {
+              d.setDate(d.getDate() + 1)) 
+            {
               if (bookedDays.has(d.toISOString().slice(0, 10))) return false;
             }
             return true;
@@ -227,11 +200,19 @@
               start: price.start,
               end: price.end,
               backgroundColor: price.backgroundColor,
-              borderColor: price.backgroundColor
+              borderColor: price.backgroundColor,
+              display: 'background',
+              textColor: '#000',
+              classNames: ['price-event']
             };
           });
 
-          successCallback([...eventsWithAdjustedEnd, ...priceEvents]);
+          successCallback([
+            ...eventsWithHalfDays,      // Events aus /api/events (Anreise/Abreise)
+            ...eventsWithAdjustedEnd,   // Events aus /api/events (volle Tage)
+            ...priceEvents              // Preis-Events
+            // ggf. weitere Events
+          ]);
         } catch (err) {
           failureCallback(err);
         }
@@ -300,7 +281,7 @@
             // Dialog öffnen
             document.getElementById('start').value = startDate;
             document.getElementById('end').value = new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10);
-            document.getElementById('formOverlay').style.display = 'flex';
+            openBookingDialog();
             calculatePrice();
           });
         });
@@ -452,6 +433,13 @@
       startDate = document.getElementById('start').value;
       endDate = document.getElementById('end').value;
       calculatePrice();
+    }
+
+    function openBookingDialog() {
+      document.getElementById('formOverlay').style.display = 'flex';
+      setTimeout(() => {
+        document.getElementById('name').focus();
+      }, 50);
     }
 
     // Scroll-Funktion für aktuellen Monat

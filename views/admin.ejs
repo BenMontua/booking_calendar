@@ -3,74 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <title>Admin – Preise verwalten</title>
-
+  <link rel="stylesheet" href="/main.css">
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 1rem;
-    }
-
-    #calendar {
-      margin: 0 auto;
-      width: 90vw;
-      max-width: 90vw;
-    }
-
-    #priceModal {
-      position: fixed;
-      top: 20%;
-      left: 50%;
-      transform: translateX(-50%);
-      background: white;
-      border: 1px solid #ccc;
-      padding: 1rem;
-      display: none;
-      z-index: 1000;
-    }
-
-    #priceModal input, #priceModal select {
-      display: block;
-      margin: 0.5rem 0;
-      width: 100%;
-    }
-
-    #overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: rgba(0,0,0,0.3);
-      z-index: 900;
-    }
-
-    .fc-event-title {
-      font-size: 0.85em;
-      text-align: center;
-      width: 100%;
-      display: block;
-    }
-
-    /* Buchungs-Bearbeitungsdialog */
-    #bookingModal {
-      display: none;
-      position: fixed;
-      top: 20%;
-      left: 50%;
-      transform: translateX(-50%);
-      background: white;
-      border: 1px solid #ccc;
-      padding: 1rem;
-      z-index: 1001;
-      width: 500px; /* Doppelte Breite (Standard war ca. 350px) */
-      max-width: 90vw;
-    }
-
-    #bookingModal input, #bookingModal select {
-      display: block;
-      margin: 0.5rem 0;
-      width: 100%;
-    }
+    /* ...dein bisheriges CSS... */
   </style>
 </head>
 <body>
@@ -157,6 +92,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.18/index.global.min.js"></script>
+  
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       let lastSelectEvent = null;
@@ -223,9 +159,10 @@
               end: ev.end ? new Date(new Date(ev.end).getTime() + 86400000).toISOString().slice(0, 10) : ev.end
             }));
 
-            // Filter "Alle Kalender" Events je nach Checkbox
+
+            // Filter "Hindeloopen" Events je nach Checkbox
             if (!showCombinedCalendar) {
-              icalEvents = icalEvents.filter(ev => ev.calendarName !== "Alle Kalender");
+              icalEvents = icalEvents.filter(ev => (ev.calendarName !== "Hindeloopen" && ev.calendarName !== "Hindeloopen Belegt"));
             }
 
             // Alle belegten Tage sammeln
@@ -273,8 +210,13 @@
               };
             });
 
-            // Alle Events zusammen anzeigen
-            successCallback([...priceEvents, ...bookings, ...icalEvents]);
+
+            // Dann kannst du sie z.B. so in FullCalendar anzeigen:
+            successCallback([
+              ...priceEvents,      // falls du Preis-Events hast
+              ...bookings,         // falls du Buchungen hast
+              ...icalEvents       // falls du iCal-Events hast
+            ]);
           } catch (err) {
             failureCallback(err);
           }
@@ -544,6 +486,8 @@
         //if (!confirm('Buchung wirklich löschen?')) return;
         const response = await fetch(`/api/events/${currentBookingId}`, { method: 'DELETE' });
         if (response.ok) {
+          // NEU: Lösche auch aus den combined Kalendern
+          await fetch(`/api/ical-events/${currentBookingId}`, { method: 'DELETE' });
           calendar.refetchEvents();
           hideBookingModal();
         } else {

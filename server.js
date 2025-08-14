@@ -24,16 +24,41 @@ const FIXKOSTEN = { reinigung: 100, bettwaesche: 15 };
 // Liste der iCal-Kalender mit Farben
 const icalCalendars = [
   { name: "Booking", url: "https://ical.booking.com/v1/export?t=f4bea42b-a403-4b92-af56-f53ef94efecb", color: "#b3b3b3ff", border: "#fcabdeff" },
-  { name: "BestFewo", url: "https://www.optimale-praesentation.de/comm/ical/eb159700_f2e12b7b/belegungen.ics", color: "#a67fbaff", border: "#5e008f" }
+  { name: "BestFewo", url: "https://www.optimale-praesentation.de/comm/ical/eb159700_f51bed3f/belegungen.ics", color: "#a67fbaff", border: "#5e008f" }
   // Weitere Kalender nach Bedarf, jeweils mit color und border
 ];
 
-// Konfiguration für den Sammel-Kalender (alle importierten Events zusammengefasst)
-const icalCombinedCalendar = {
-  name: "Alle Kalender",
-  color: "#28a745",      // z.B. grün
-  border: "#1e7e34"
-};
+
+// Google Calendar API Setup
+const { client_id, client_secret, redirect_uris } = credentials.installed;
+const oAuth2Client = new google.auth.OAuth2(
+  client_id,
+  client_secret,
+  redirect_uris[0]
+);
+oAuth2Client.setCredentials(token);
+
+// dieser Kalender zeigt die Events mit Namen, Personenanzahl und Haustieren an
+const calendar = google.calendar({ version: 'v3', auth: oAuth2Client });
+
+
+// Konfiguration für die Sammel-Kalender als Array inkl. Google Calendar IDs
+const icalCombinedCalendars = [
+  {
+    // dieser Kalender zeigt die Events mit Namen, Personenanzahl und Haustieren an
+    name: "Hindeloopen",
+    color: "#28a745",
+    border: "#1e7e34",
+    googleCalendarId: 'b878d561d60b5b4e1546ec54f4c1db269ad15186109544f436df5a5b6f3c85ed@group.calendar.google.com'
+  },
+  {
+    // Dieser Kalender zeigt die Events nur als "Belegt" an
+    name: "Hindeloopen Belegt",
+    color: "#1a7a00ff",
+    border: "#006326ff",
+    googleCalendarId: '3eff8ce98b1c4862b210ed8dd189b3ecf662211e49a8706bfabc3f2896fa6847@group.calendar.google.com'
+  }
+];
 
 
 
@@ -69,13 +94,15 @@ CREATE TABLE IF NOT EXISTS ical_events (
   title TEXT,
   start TEXT,
   end TEXT,
-  calendarName TEXT
+  calendarName TEXT,
+  backgroundColor TEXT,
+  borderColor TEXT,
+  booking_id INTEGER  -- Referenz auf bookings.id
 );
 `);
 
-
-// Neue Spalte min_nights zu prices hinzufügen (falls noch nicht vorhanden)
-try { db.prepare('ALTER TABLE prices ADD COLUMN min_nights INTEGER DEFAULT 1').run(); } catch(e){}
+// Spalte booking_id hinzufügen, falls sie noch nicht existiert
+//try { db.prepare('ALTER TABLE ical_events ADD COLUMN booking_id INTEGER').run(); } catch(e){}
 
 // Einmalig: Alle Buchungen löschen
 //db.exec('DELETE FROM bookings');
@@ -104,6 +131,7 @@ app.get('/api/events', (req, res) => {
     textColor: '#222',
     category: b.category,
     extendedProps: {
+      source: 'events',
       name: b.name,
       email: b.email,
       total_price: b.total_price,
@@ -182,7 +210,7 @@ Ihr Buchungsteam`
 // Preise abrufen – gestapelt, farbig pro Kategorie
 app.get('/api/prices', (req, res) => {
   const colorMap = {
-    "Category1": '#029df1ff', // blau
+    "Category1": '#4ba53dff', // blau
     "Category2": '#8300c4'  // lila
   };
 
@@ -342,33 +370,85 @@ app.delete('/api/events/:id', (req, res) => {
 // Funktion zum Speichern der iCal-Events in SQLite
 async function saveIcalEventsToDB(events) {
   db.prepare('DELETE FROM ical_events').run();
-  const insert = db.prepare('INSERT INTO ical_events (title, start, end, calendarName, backgroundColor, borderColor) VALUES (?, ?, ?, ?, ?, ?)');
+  const insert = db.prepare('INSERT INTO ical_events (title, start, end, calendarName, backgroundColor, borderColor, booking_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
   const insertMany = db.transaction((events) => {
     for (const ev of events) {
-      insert.run(ev.title, ev.start, ev.end, ev.calendarName, ev.backgroundColor, ev.borderColor);
+      // booking_id aus ev.booking_id, falls vorhanden, sonst null
+      insert.run(ev.title, ev.start, ev.end, ev.calendarName, ev.backgroundColor, ev.borderColor, ev.booking_id || null);
     }
   });
   insertMany(events);
 }
 
+function logWithTimestamp(message) {
+  const now = new Date();
+  // Format: YYYY-MM-DD HH:mm:ss (CET/CEST)
+  const cetTime = now.toLocaleString('de-DE', {
+    timeZone: 'Europe/Berlin',
+    hour12: false
+  }).replace(',', '');
+  console.log(`[${cetTime}] ${message}`);
+}
+
 async function syncIcalCalendars() {
+  logWithTimestamp('Alle Kalender werden synchronisiert...');
   const allEvents = [];
+  // 1. Hole alle Buchungen aus der DB
+  const bookings = db.prepare('SELECT * FROM bookings').all();
+
+  // Hilfsfunktion: Prüfe Überschneidung
+  function overlaps(evStart, evEnd, booking) {
+    // Alle Daten als YYYY-MM-DD vergleichen
+    const evStartDate = new Date(evStart);
+    const evEndDate = new Date(evEnd);
+    const bookingStart = new Date(booking.start_date);
+    const bookingEnd = new Date(booking.end_date);
+    // true, wenn sich die Zeiträume überschneiden
+    return evStartDate < bookingEnd && evEndDate > bookingStart;
+  }
+
+  // final calender array
+  const combinedEvents = [];
+
   for (const cal of icalCalendars) {
     try {
       const res = await fetch(cal.url);
       const icsText = await res.text();
-      const jcalData = ICAL.parse(icsText);
+      let jcalData;
+      try {
+        jcalData = ICAL.parse(icsText);
+      } catch (parseErr) {
+        console.warn(`Fehler beim Parsen von ${cal.name}:`, parseErr.message);
+        return; // Kalender überspringen
+      }
       const comp = new ICAL.Component(jcalData);
-      const vevents = comp.getAllSubcomponents('vevent');
+      const vevents = Array.isArray(comp.getAllSubcomponents?.('vevent')) ? comp.getAllSubcomponents('vevent') : [];
+      if (!vevents.length) {
+        console.warn(`Keine Events gefunden in ${cal.name}`);
+        return;
+      }
       vevents.forEach(ev => {
         const event = new ICAL.Event(ev);
         let endDateEvent = event.endDate ? new Date(event.endDate.toString()) : new Date(event.startDate.toString());
-        // NEU: Auch als Buchung in die DB eintragen, aber nur wenn noch nicht vorhanden
+        //endDateEvent.setDate(endDateEvent.getDate() + 1); // Enddatum + 1 Tag
         const startDate = event.startDate.toString().slice(0, 10);
         const endDate = endDateEvent.toISOString().slice(0, 10);
 
-        //endDate.setDate(endDate.getDate() + 1);
-        allEvents.push({
+        // Prüfe, ob eine Buchung für diesen Zeitraum existiert
+        const hasBooking = bookings.some(b => overlaps(startDate, endDate, b));
+        if (!hasBooking) {
+          // Füge Event für combined Kalender hinzu
+          allEvents.push({
+            title: `${cal.name}: ${event.summary}`,
+            start: startDate,
+            end: endDate,
+            calendarName: cal.name,
+            backgroundColor: cal.color,
+            borderColor: cal.border
+          });
+        }
+        // alle externen ical Kalender events direkt in die Zieltabelle eintragen
+        combinedEvents.push({
           title: `${cal.name}: ${event.summary}`,
           start: startDate,
           end: endDate,
@@ -376,127 +456,105 @@ async function syncIcalCalendars() {
           backgroundColor: cal.color,
           borderColor: cal.border
         });
-
-        const existsBooking = db.prepare(
-          'SELECT id FROM bookings WHERE start_date = ? AND end_date = ?'
-        ).get(startDate, endDate);
-
-        if (!existsBooking) {
-          const insertBooking = db.prepare(`INSERT INTO bookings 
-            (title, start_date, end_date, name, email, category, total_price, guests, has_pet) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-          insertBooking.run(
-            "Belegt",
-            startDate,
-            endDate,
-            cal.name,
-            "",
-            "Category1",
-            0,
-            1,
-            0
-          );
-        }
       });
     } catch (err) {
-      console.warn(`Fehler beim Laden von ${cal.name}:`, err);
+      console.warn(`Fehler beim Laden von ${cal.name}:`, err.message);
     }
   }
 
-  // Sammel-Kalender-Event: alle importierten Events zusammengefasst
-  // Jeder Event bekommt den Originaltitel aus dem importierten Kalender!
-  const combinedEvents = allEvents.map(ev => ({
-    // Nur den Originaltitel übernehmen, KEIN "Alle Kalender:" davor!
-    title: ev.title,
-    start: ev.start,
-    end: ev.end,
-    calendarName: icalCombinedCalendar.name,
-    backgroundColor: icalCombinedCalendar.color,
-    borderColor: icalCombinedCalendar.border
-  }));
+  // 2. Füge alle Buchungen als Events für Hindeloopen hinzu
+  bookings.forEach(b => {
+    let title = b.name + ' - ' + b.guests + ' Personen' + (b.has_pet ? ' mit Haustier 🐾' : '');
+    allEvents.push({
+      title: title,
+      start: b.start_date,
+      end: b.end_date,
+      calendarName: icalCombinedCalendars[0].name,
+      backgroundColor: icalCombinedCalendars[0].color,
+      borderColor: icalCombinedCalendars[0].border,
+      booking_id: b.id // Referenz auf bookings.id
+    });
+  });
 
-  // only uncomment this line if you want to delete all events from the combined calendar before writing new ones
-  //await deleteAllEventsFromCombinedGoogleCalendar();
-  // Speichere alle Einzel-Events und Sammel-Events
-  await saveIcalEventsToDB([...allEvents, ...combinedEvents]);
-  await writeCombinedEventsToGoogleCalendar(); // <-- Hier wird sie nach jedem Sync aufgerufen!
+  // 3. Sammel-Kalender-Event: alle importierten Events und Buchungen zusammengefasst
+  // Events für beide Kalender erzeugen
+  icalCombinedCalendars.forEach(calConf => {
+    allEvents.forEach(ev => {
+      combinedEvents.push({
+        title: calConf.name === "Hindeloopen Belegt" ? "Belegt" : ev.title,
+        start: ev.start,
+        end: ev.end,
+        calendarName: calConf.name,
+        backgroundColor: calConf.color,
+        borderColor: calConf.border,
+        booking_id: ev.booking_id // Referenz auf bookings.id
+      });
+    });
+  });
+
+  await saveIcalEventsToDB(combinedEvents);
+  await writeCombinedEventsToGoogleCalendar();
 }
 
 
-// Google Calendar API Setup
-const { client_id, client_secret, redirect_uris } = credentials.installed;
-const oAuth2Client = new google.auth.OAuth2(
-  client_id,
-  client_secret,
-  redirect_uris[0]
-);
-oAuth2Client.setCredentials(token);
 
-const calendar = google.calendar({ version: 'v3', auth: oAuth2Client });
-const calendarId = 'b878d561d60b5b4e1546ec54f4c1db269ad15186109544f436df5a5b6f3c85ed@group.calendar.google.com';
-
-// Neue Funktion: Kombinierte Events in Google Calendar schreiben
+// Funktion: Kombinierte Events in Google Calendar schreiben (für beide Kalender)
 async function writeCombinedEventsToGoogleCalendar() {
-  // Hole alle Sammel-Events aus der DB
-  const rows = db.prepare('SELECT * FROM ical_events WHERE calendarName = ?').all(icalCombinedCalendar.name);
+  // Hindeloopen
+  const hindeloopenRows = db.prepare('SELECT * FROM ical_events WHERE calendarName = ?').all(icalCombinedCalendars[0].name);
+  await writeEventsToGoogleCalendar(hindeloopenRows, icalCombinedCalendars[0].googleCalendarId);
 
+  // Hindeloopen Belegt
+  const belegtRows = db.prepare('SELECT * FROM ical_events WHERE calendarName = ?').all(icalCombinedCalendars[1].name);
+  await writeEventsToGoogleCalendar(belegtRows, icalCombinedCalendars[1].googleCalendarId);
+}
+
+// Hilfsfunktion: Schreibe Events in einen bestimmten Google Kalender
+async function writeEventsToGoogleCalendar(events, targetCalendarId) {
   // Duplikate vermeiden: Hole existierende Events aus Google Kalender
   const existingEvents = await calendar.events.list({
-    calendarId: calendarId,
-    timeMin: new Date().toISOString(), // nur zukünftige Events
+    calendarId: targetCalendarId,
     maxResults: 2500,
     singleEvents: true,
-    orderBy: 'startTime'
+    orderBy: 'startTime',
+    // wirklich auch alle vergangenen Events holen? Nächste Zeile einkommentieren
+    //timeMin: "2025-01-01T00:00:00Z"
   });
 
-  // Erstelle eine Set mit Titeln und Startzeiten der existierenden Events
   const existingSet = new Set(
     existingEvents.data.items.map(ev =>
       `${ev.summary}|${(ev.start?.dateTime || ev.start?.date || '').slice(0, 10)}`
     )
   );
 
-  console.log(`Überprüfe ${rows.length} Events auf fehlende Einträge im Google Kalender: ${icalCombinedCalendar.name}`);
-
-  for (const ev of rows) {
-    // Nur das Datum extrahieren (ohne Uhrzeit/Zeitzone)
+  for (const ev of events) {
     const startDate = new Date(ev.start);
     const startKey = `${ev.title}|${startDate.toISOString().slice(0, 10)}`;
-
-    // Passe auch die existingSet-Erstellung an:
-    const existingSet = new Set(
-      existingEvents.data.items.map(ev =>
-        `${ev.summary}|${(ev.start?.dateTime || ev.start?.date || '').slice(0, 10)}`
-      )
-    );
-
-    if (existingSet.has(startKey)) continue; // Event existiert schon, überspringen
+    if (existingSet.has(startKey)) continue;
 
     try {
       await calendar.events.insert({
-        calendarId,
+        calendarId: targetCalendarId,
         resource: {
           summary: ev.title,
           start: { dateTime: startDate.toISOString() },
           end: { dateTime: new Date(ev.end).toISOString() }
         }
       });
-      console.log(`Event hinzugefügt zu ${icalCombinedCalendar.name}: ${ev.title} (${startDate.toISOString()} - ${ev.end})`);
+      console.log(`Event hinzugefügt zu ${targetCalendarId}: ${ev.title} (${startDate.toISOString()} - ${ev.end})`);
     } catch (err) {
       console.error('Fehler beim Schreiben in Google Kalender:', err);
     }
   }
 }
 
-// Funktion: Alle Events aus dem "Alle Kalender"-Google-Kalender löschen
-async function deleteAllEventsFromCombinedGoogleCalendar() {
-
-  console.log('Lösche alle Events aus dem Google Kalender:', calendarId);
-  // Alle Events abrufen (ggf. paginieren)
+// Hilfsfunktion: Lösche alle Events aus einem bestimmten Google Kalender
+async function deleteAllEventsFromGoogleCalendar(targetCalendarId) {
+  console.log('Lösche alle Events aus dem Google Kalender:', targetCalendarId);
   let pageToken = undefined;
   do {
     const res = await calendar.events.list({
-      calendarId,
+      calendarId: targetCalendarId,
       maxResults: 2500,
       singleEvents: true,
       pageToken
@@ -504,7 +562,7 @@ async function deleteAllEventsFromCombinedGoogleCalendar() {
     const events = res.data.items;
     for (const ev of events) {
       try {
-        await calendar.events.delete({ calendarId, eventId: ev.id });
+        await calendar.events.delete({ calendarId: targetCalendarId, eventId: ev.id });
         console.log(`Event gelöscht: ${ev.summary} (${ev.start?.dateTime || ev.start?.date})`);
       } catch (err) {
         console.error('Fehler beim Löschen aus Google Kalender:', err);
@@ -514,8 +572,13 @@ async function deleteAllEventsFromCombinedGoogleCalendar() {
   } while (pageToken);
 }
 
+// Google Kalender manuell leeren
+//deleteAllEventsFromGoogleCalendar(icalCombinedCalendars[0].googleCalendarId); // Hindeloopen
+//deleteAllEventsFromGoogleCalendar(icalCombinedCalendars[1].googleCalendarId); // Belegt
+
+
 // Alle 5 Minuten synchronisieren
-setInterval(syncIcalCalendars, 5 * 60 * 1000);
+setInterval(syncIcalCalendars, 1 * 60 * 1000);
 // Beim Serverstart einmal synchronisieren
 syncIcalCalendars();
 
@@ -534,6 +597,64 @@ app.get('/api/ical-events', (req, res) => {
     calendarName: ev.calendarName // <-- Kalendername wird mit ausgegeben
   }));
   res.json(events);
+});
+
+// Hilfsfunktion: Lösche alle Events eines bestimmten Kalenders aus der combined Kalender-Tabelle
+function deleteCombinedEventsBySource(sourceCalendarName) {
+  db.prepare('DELETE FROM ical_events WHERE calendarName = ?').run(sourceCalendarName);
+}
+
+// Beispiel: Lösche Events aus combined Kalendern, wenn Buchungen oder iCal-Events gelöscht werden
+app.delete('/api/events/:id', async (req, res) => {
+  try {
+    const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(req.params.id);
+    if (booking) {
+      db.prepare('DELETE FROM bookings WHERE id = ?').run(req.params.id);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Löschen der Buchung und aus den combined Kalendern' });
+  }
+});
+
+// Beispiel: Lösche iCal-Events und aus combined Kalendern
+app.delete('/api/ical-events/:id', async (req, res) => {
+  try {
+    const event = db.prepare('SELECT * FROM ical_events WHERE booking_id = ?').get(req.params.id);
+    if (event) {
+      db.prepare('DELETE FROM ical_events WHERE booking_id = ?').run(req.params.id);
+
+      // Event auch aus Google Kalendern löschen
+      for (const calConf of icalCombinedCalendars) {
+        const gEvents = await calendar.events.list({
+          calendarId: calConf.googleCalendarId,
+          maxResults: 2500,
+          singleEvents: true,
+          orderBy: 'startTime'
+        });
+
+        const target = gEvents.data.items.find(ev =>
+          ev.summary === (calConf.name === "Hindeloopen Belegt" ? "Belegt" : event.title) &&
+          (ev.start?.dateTime || ev.start?.date || '').slice(0, 10) === event.start.slice(0, 10)
+        );
+
+        if (target) {
+          try {
+            await calendar.events.delete({
+              calendarId: calConf.googleCalendarId,
+              eventId: target.id
+            });
+            console.log(`Event aus Google Kalender "${calConf.name}" gelöscht: ${target.summary} (${target.start?.dateTime || target.start?.date})`);
+          } catch (err) {
+            console.error('Fehler beim Löschen aus Google Kalender:', err);
+          }
+        }
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Löschen des iCal-Events und aus den combined Kalendern' });
+  }
 });
 
 
